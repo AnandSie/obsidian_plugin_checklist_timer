@@ -2,11 +2,19 @@ import { App, PluginSettingTab, Setting } from 'obsidian';
 import ChecklistTimerPlugin from './main';
 
 export interface ChecklistTimerSettings {
-	mySetting: string;
+	// Checklists whose first item's text contains this tag are timed; that
+	// first item also doubles as the start item. See CLAUDE.md.
+	timedTag: string;
+	// Vault-relative folder for timing output notes. Empty = vault root.
+	outputFolder: string;
+	// Supports {{date}} and {{title}} placeholders.
+	filenameTemplate: string;
 }
 
 export const DEFAULT_SETTINGS: ChecklistTimerSettings = {
-	mySetting: 'default',
+	timedTag: '#timed',
+	outputFolder: '',
+	filenameTemplate: '{{date}} {{title}} timing',
 };
 
 export class ChecklistTimerSettingTab extends PluginSettingTab {
@@ -23,14 +31,43 @@ export class ChecklistTimerSettingTab extends PluginSettingTab {
 		containerEl.empty();
 
 		new Setting(containerEl)
-			.setName('Settings #1')
-			.setDesc("It's a secret")
+			.setName('Timed checklist tag')
+			.setDesc(
+				"A checklist is timed when its first item's text contains this tag. Checking that first item starts the timer.",
+			)
 			.addText((text) =>
 				text
-					.setPlaceholder('Enter your secret')
-					.setValue(this.plugin.settings.mySetting)
+					.setPlaceholder('#timed')
+					.setValue(this.plugin.settings.timedTag)
 					.onChange(async (value) => {
-						this.plugin.settings.mySetting = value;
+						this.plugin.settings.timedTag = value.trim() || '#timed';
+						await this.plugin.saveSettings();
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName('Output folder')
+			.setDesc('Vault-relative folder for timing notes. Leave empty for vault root.')
+			.addText((text) =>
+				text
+					.setPlaceholder('')
+					.setValue(this.plugin.settings.outputFolder)
+					.onChange(async (value) => {
+						this.plugin.settings.outputFolder = value.trim();
+						await this.plugin.saveSettings();
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName('Filename template')
+			.setDesc('Supports {{date}} and {{title}} placeholders.')
+			.addText((text) =>
+				text
+					.setPlaceholder('{{date}} {{title}} timing')
+					.setValue(this.plugin.settings.filenameTemplate)
+					.onChange(async (value) => {
+						this.plugin.settings.filenameTemplate =
+							value.trim() || '{{date}} {{title}} timing';
 						await this.plugin.saveSettings();
 					}),
 			);
