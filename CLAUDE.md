@@ -82,9 +82,10 @@ rather than batching everything until the end:
 - The note is created (lazily, on the first item checked after the start
   item) and each subsequent check-off appends a line to it immediately —
   so an abandoned/never-finished checklist still keeps whatever was timed.
-- A "Total" line is appended when the session ends, either because the last
-  item was checked, or because of a manual stop — the latter is marked
-  `(stopped early)` so it's clear the checklist wasn't finished.
+- When the session ends — either because the last item was checked, or via
+  manual stop (marked `(stopped early)`) — a "Total" line is appended,
+  followed by a second list of the same items **sorted slowest-first**, so
+  the bottleneck is immediately visible without doing the comparison by eye.
 - Output location: configurable folder path, defaulting to vault root.
 - Filename: configurable via a template (further templating, e.g. reusing the
   user's existing Templater templates, is a future idea — not v1).

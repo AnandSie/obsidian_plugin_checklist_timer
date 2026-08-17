@@ -3,6 +3,11 @@ import { ChecklistBlock, findTimedBlocks, resolveStartIndex } from './utils/chec
 import { formatDuration, renderFilename } from './utils/format';
 import { ChecklistTimerSettings } from './settings';
 
+interface TimedResult {
+	text: string;
+	durationMs: number;
+}
+
 interface ActiveSession {
 	filePath: string;
 	blockStartLine: number;
@@ -12,8 +17,11 @@ interface ActiveSession {
 	// null until the first item is timed — the output note is created lazily
 	// so a session with zero timed items leaves no stray file behind.
 	outputFile: TFile | null;
-	itemCount: number;
-	totalMs: number;
+	// Kept in memory (in addition to being appended line-by-line) so the
+	// finish footer can add a slowest-first summary. If Obsidian crashes
+	// before finish, this in-memory copy is lost, but the already-appended
+	// lines in the note are not — see CLAUDE.md.
+	results: TimedResult[];
 }
 
 // Tracks at most one running session across the whole vault (see CLAUDE.md:
@@ -96,8 +104,7 @@ export class SessionManager {
 				title,
 				outputPath: this.resolveOutputPath(title),
 				outputFile: null,
-				itemCount: 0,
-				totalMs: 0,
+				results: [],
 			};
 			new Notice('Checklist timer: started.');
 			this.onStatusChange('Checklist timer: running');
@@ -119,8 +126,7 @@ export class SessionManager {
 
 		const duration = now - session.lastEventTime;
 		session.lastEventTime = now;
-		session.itemCount += 1;
-		session.totalMs += duration;
+		session.results.push({ text: item.text, durationMs: duration });
 
 		await this.appendItem(session, item.text, duration);
 
@@ -178,7 +184,14 @@ export class SessionManager {
 		}
 
 		const suffix = reason === 'stopped' ? ' (stopped early)' : '';
-		const footer = `\nTotal: ${formatDuration(session.totalMs)}${suffix}\n`;
+		const totalMs = session.results.reduce((sum, result) => sum + result.durationMs, 0);
+		const slowestFirst = [...session.results].sort((a, b) => b.durationMs - a.durationMs);
+		const slowestFirstLines = slowestFirst
+			.map((result) => `- ${result.text}: ${formatDuration(result.durationMs)}`)
+			.join('\n');
+		const footer =
+			`\nTotal: ${formatDuration(totalMs)}${suffix}\n\n` +
+			`## Sorted by duration (slowest first)\n\n${slowestFirstLines}\n`;
 		try {
 			await this.app.vault.append(session.outputFile, footer);
 			new Notice(`Checklist timer: saved timing to ${session.outputPath}`);
