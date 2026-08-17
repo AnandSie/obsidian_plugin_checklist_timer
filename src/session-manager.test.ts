@@ -61,6 +61,7 @@ function makeManager(
 	vault: FakeVault,
 	clock: FakeClock,
 	overrides: Partial<ChecklistTimerSettings> = {},
+	normalizePath: (path: string) => string = (path) => path,
 ) {
 	const notices: string[] = [];
 	const statuses: string[] = [];
@@ -71,6 +72,7 @@ function makeManager(
 		(status) => statuses.push(status),
 		(message) => notices.push(message),
 		clock.now,
+		normalizePath,
 	);
 	return { manager, notices, statuses };
 }
@@ -274,5 +276,38 @@ describe('SessionManager — two checklists started while one is running', () =>
 		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n');
 		const content = vault.findContent('Note timing');
 		assert.ok(content?.includes('Two: 00:00:01'), 'the original session must still be intact');
+	});
+});
+
+describe('SessionManager — output path normalization', () => {
+	it('runs the configured output folder and final path through normalizePath', async () => {
+		const vault = new FakeVault();
+		const clock = new FakeClock();
+		const normalizeCalls: string[] = [];
+		// Stand-in for Obsidian's normalizePath: strips a trailing slash the
+		// user might type into the output folder setting.
+		const fakeNormalizePath = (path: string) => {
+			normalizeCalls.push(path);
+			return path.replace(/\/+$/, '');
+		};
+		const { manager } = makeManager(
+			vault,
+			clock,
+			{ outputFolder: 'Timing Logs/' },
+			fakeNormalizePath,
+		);
+		const file = sourceFile('Note.md');
+
+		await manager.handleFileContent(file, '#timed\n- [ ] Start\n- [ ] Two\n');
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [ ] Two\n');
+		clock.advance(1_000);
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n');
+
+		assert.ok(normalizeCalls.includes('Timing Logs/'), 'the raw folder should be normalized');
+		assert.ok(vault.folders.has('Timing Logs'), 'the trailing slash must be stripped before use');
+		assert.ok(
+			[...vault.files.keys()][0]?.startsWith('Timing Logs/'),
+			'the final output path must use the normalized folder',
+		);
 	});
 });

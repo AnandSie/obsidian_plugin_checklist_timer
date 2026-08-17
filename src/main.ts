@@ -1,4 +1,11 @@
-import { MarkdownFileInfo, MarkdownView, Notice, Plugin, TFile } from 'obsidian';
+import {
+	MarkdownFileInfo,
+	MarkdownView,
+	Notice,
+	normalizePath,
+	Plugin,
+	TFile,
+} from 'obsidian';
 import {
 	DEFAULT_SETTINGS,
 	ChecklistTimerSettings,
@@ -21,6 +28,8 @@ export default class ChecklistTimerPlugin extends Plugin {
 			this.settings,
 			(status) => this.statusBarItemEl.setText(status),
 			(message) => new Notice(message),
+			Date.now,
+			normalizePath,
 		);
 
 		this.addRibbonIcon('timer', 'Stop checklist timer', () => {

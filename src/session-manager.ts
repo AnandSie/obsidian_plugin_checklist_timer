@@ -41,6 +41,9 @@ export class SessionManager {
 		private readonly onStatusChange: (status: string) => void,
 		private readonly notify: Notifier,
 		private readonly now: () => number = Date.now,
+		// Obsidian's normalizePath() — cleans user-typed folder paths (stray
+		// slashes, platform separators, etc.) before they hit the filesystem.
+		private readonly normalizePath: (path: string) => string = (path) => path,
 	) {}
 
 	updateSettings(settings: ChecklistTimerSettings) {
@@ -165,19 +168,30 @@ export class SessionManager {
 		this.onStatusChange(`Checklist timer: running (${title})`);
 	}
 
+	private normalizedFolder(): string {
+		const folder = this.settings.outputFolder.trim();
+		return folder ? this.normalizePath(folder) : '';
+	}
+
 	private resolveOutputPath(title: string): string {
 		const filename = renderFilename(this.settings.filenameTemplate, title);
-		const folder = this.settings.outputFolder.trim();
-		return folder ? `${folder}/${filename}.md` : `${filename}.md`;
+		const folder = this.normalizedFolder();
+		const rawPath = folder ? `${folder}/${filename}.md` : `${filename}.md`;
+		return this.normalizePath(rawPath);
 	}
 
 	private async appendItem(session: ActiveSession, text: string, durationMs: number) {
 		const line = `- ${text}: ${formatDuration(durationMs)}\n`;
 		try {
 			if (!session.outputFile) {
-				const folder = this.settings.outputFolder.trim();
+				const folder = this.normalizedFolder();
 				if (folder && !this.vault.getAbstractFileByPath(folder)) {
-					await this.vault.createFolder(folder).catch(() => {});
+					try {
+						await this.vault.createFolder(folder);
+					} catch {
+						// Folder may already exist (e.g. a race with another writer,
+						// or our existence check was briefly stale) — harmless.
+					}
 				}
 				const header = `# Checklist timing — ${session.title}\n\n`;
 				session.outputFile = await this.vault.create(session.outputPath, header + line);
