@@ -65,15 +65,26 @@ mechanism should feel familiar rather than inventing something new.
   rolled-up time from children) are **out of scope for v1** — the author
   doesn't use indentation in their checklists currently. Parked as a future
   feature, not a bug to fix now.
-- No session persistence/resume: if Obsidian closes or crashes mid-session,
-  the session is simply lost. This is intentional simplicity, not an
-  oversight — resuming interrupted sessions is backlogged, not v1.
+- No *session-state* persistence/resume: if Obsidian closes or crashes
+  mid-session, the in-memory session (start time, which block it belongs to)
+  is simply lost — reopening Obsidian will not pick the timer back up. This is
+  intentional simplicity, not an oversight — resuming interrupted sessions is
+  backlogged, not v1.
+- The output note itself, however, is written incrementally (see below), so
+  whichever items were already checked off before a crash/abandonment keep
+  their recorded time even though the session can't be resumed.
 
 ## Output / data storage
 
-On session end (last item checked, or manual stop), the plugin writes a note
-into the vault:
+The plugin writes to a note in the vault incrementally, one item at a time,
+rather than batching everything until the end:
 
+- The note is created (lazily, on the first item checked after the start
+  item) and each subsequent check-off appends a line to it immediately —
+  so an abandoned/never-finished checklist still keeps whatever was timed.
+- A "Total" line is appended when the session ends, either because the last
+  item was checked, or because of a manual stop — the latter is marked
+  `(stopped early)` so it's clear the checklist wasn't finished.
 - Output location: configurable folder path, defaulting to vault root.
 - Filename: configurable via a template (further templating, e.g. reusing the
   user's existing Templater templates, is a future idea — not v1).

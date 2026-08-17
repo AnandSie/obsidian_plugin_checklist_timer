@@ -3,20 +3,24 @@ import { ChecklistBlock, findTimedBlocks, resolveStartIndex } from './utils/chec
 import { formatDuration, renderFilename } from './utils/format';
 import { ChecklistTimerSettings } from './settings';
 
-interface TimedResult {
-	text: string;
-	durationMs: number;
-}
-
 interface ActiveSession {
 	filePath: string;
 	blockStartLine: number;
 	lastEventTime: number;
-	results: TimedResult[];
+	title: string;
+	outputPath: string;
+	// null until the first item is timed — the output note is created lazily
+	// so a session with zero timed items leaves no stray file behind.
+	outputFile: TFile | null;
+	itemCount: number;
+	totalMs: number;
 }
 
 // Tracks at most one running session across the whole vault (see CLAUDE.md:
-// "each item is only one item at a time in progress").
+// "each item is only one item at a time in progress"). The output note is
+// written incrementally, one item at a time, so progress survives even if
+// the checklist is never finished (see CLAUDE.md: no session resume, but
+// completed items shouldn't be lost either).
 export class SessionManager {
 	private activeSession: ActiveSession | null = null;
 	private readonly blockStateCache = new Map<string, boolean[]>();
@@ -84,11 +88,16 @@ export class SessionManager {
 				);
 				return;
 			}
+			const title = file.basename;
 			this.activeSession = {
 				filePath: file.path,
 				blockStartLine: block.startLine,
 				lastEventTime: now,
-				results: [],
+				title,
+				outputPath: this.resolveOutputPath(title),
+				outputFile: null,
+				itemCount: 0,
+				totalMs: 0,
 			};
 			new Notice('Checklist timer: started.');
 			this.onStatusChange('Checklist timer: running');
@@ -109,11 +118,14 @@ export class SessionManager {
 		if (!item) return;
 
 		const duration = now - session.lastEventTime;
-		session.results.push({ text: item.text, durationMs: duration });
 		session.lastEventTime = now;
+		session.itemCount += 1;
+		session.totalMs += duration;
+
+		await this.appendItem(session, item.text, duration);
 
 		if (index === block.items.length - 1) {
-			await this.finishSession(file);
+			await this.finishSession('completed');
 		}
 	}
 
@@ -122,57 +134,58 @@ export class SessionManager {
 			new Notice('Checklist timer: no active timer.');
 			return;
 		}
-		const file = this.app.vault.getAbstractFileByPath(this.activeSession.filePath);
-		if (file instanceof TFile) {
-			await this.finishSession(file);
-		} else {
-			this.activeSession = null;
-			this.onStatusChange('');
+		await this.finishSession('stopped');
+	}
+
+	private resolveOutputPath(title: string): string {
+		const filename = renderFilename(this.settings.filenameTemplate, title);
+		const folder = this.settings.outputFolder.trim();
+		return folder ? `${folder}/${filename}.md` : `${filename}.md`;
+	}
+
+	private async appendItem(session: ActiveSession, text: string, durationMs: number) {
+		const line = `- ${text}: ${formatDuration(durationMs)}\n`;
+		try {
+			if (!session.outputFile) {
+				const folder = this.settings.outputFolder.trim();
+				if (folder && !this.app.vault.getAbstractFileByPath(folder)) {
+					await this.app.vault.createFolder(folder).catch(() => {});
+				}
+				const header = `# Checklist timing — ${session.title}\n\n`;
+				session.outputFile = await this.app.vault.create(
+					session.outputPath,
+					header + line,
+				);
+			} else {
+				await this.app.vault.append(session.outputFile, line);
+			}
+		} catch (err) {
+			new Notice(
+				`Checklist timer: failed to write to ${session.outputPath} (${String(err)})`,
+			);
 		}
 	}
 
-	private async finishSession(file: TFile) {
+	private async finishSession(reason: 'completed' | 'stopped') {
 		const session = this.activeSession;
 		if (!session) return;
 		this.activeSession = null;
 		this.onStatusChange('');
 
-		if (session.results.length === 0) {
+		if (!session.outputFile) {
 			new Notice('Checklist timer: stopped (no items timed).');
 			return;
 		}
 
-		await this.writeOutput(file, session.results);
-	}
-
-	private async writeOutput(file: TFile, results: TimedResult[]) {
-		const title = file.basename;
-		const totalMs = results.reduce((sum, result) => sum + result.durationMs, 0);
-		const lines = results.map(
-			(result) => `- ${result.text}: ${formatDuration(result.durationMs)}`,
-		);
-		const content = [
-			`# Checklist timing — ${title}`,
-			'',
-			`Total: ${formatDuration(totalMs)}`,
-			'',
-			...lines,
-			'',
-		].join('\n');
-
-		const filename = renderFilename(this.settings.filenameTemplate, title);
-		const folder = this.settings.outputFolder.trim();
-		const path = folder ? `${folder}/${filename}.md` : `${filename}.md`;
-
-		if (folder && !this.app.vault.getAbstractFileByPath(folder)) {
-			await this.app.vault.createFolder(folder).catch(() => {});
-		}
-
+		const suffix = reason === 'stopped' ? ' (stopped early)' : '';
+		const footer = `\nTotal: ${formatDuration(session.totalMs)}${suffix}\n`;
 		try {
-			await this.app.vault.create(path, content);
-			new Notice(`Checklist timer: saved timing to ${path}`);
+			await this.app.vault.append(session.outputFile, footer);
+			new Notice(`Checklist timer: saved timing to ${session.outputPath}`);
 		} catch (err) {
-			new Notice(`Checklist timer: failed to write ${path} (${String(err)})`);
+			new Notice(
+				`Checklist timer: failed to write total to ${session.outputPath} (${String(err)})`,
+			);
 		}
 	}
 }
