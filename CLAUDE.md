@@ -46,8 +46,12 @@ mechanism should feel familiar rather than inventing something new.
   - [ ] Send updates
   ```
 
-- The list's **first item** is the start item — no special marker on the item
-  itself. Checking it off starts the clock.
+- The start item is whichever item's text contains the start tag (default
+  `#start`, configurable). If no item in the block has that tag, the block's
+  **first item** is the start item by default — tagging it is optional, not
+  required.
+- Items before the start item (if the start item isn't the first one) are
+  simply not part of the timed sequence — checking them off is a no-op.
 - After the start item, checking off each subsequent item stops the clock for
   the interval that just elapsed and attributes that duration to the item just
   checked, then immediately starts timing the next one. So each item's
@@ -55,8 +59,8 @@ mechanism should feel familiar rather than inventing something new.
 - Only **one timer active at a time** — no parallel/concurrent items in v1.
 - A session ends either when the last item in the checklist is checked, or via
   a manual stop action in the UI.
-- Because the first checked item is by definition the start, there's no
-  "checked an item without starting" edge case to handle in v1.
+- Because the start item is unambiguous (tagged, or first-by-default), there's
+  no "checked an item without starting" edge case to handle in v1.
 - Nested/indented checklist items (parent items that would need their own
   rolled-up time from children) are **out of scope for v1** — the author
   doesn't use indentation in their checklists currently. Parked as a future
