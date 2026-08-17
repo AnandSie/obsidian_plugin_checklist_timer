@@ -34,10 +34,20 @@ mechanism should feel familiar rather than inventing something new.
 
 ## Interaction model (v1)
 
-- A timed checklist has a designated **start item** — checking it off starts
-  the clock. Exact syntax/marker for "this is the start item" is still an open
-  question (candidate: some kind of bracket/special-character convention on
-  that line) — to be experimented with, not decided yet.
+- A checklist is marked as timed by a tag on its own line **immediately above
+  the list** (default tag `#timed`, configurable) — this is the same
+  convention the Checklist plugin uses. Example:
+
+  ```
+  #timed
+  - [ ] Start week plan
+  - [ ] Review calendar
+  - [ ] Draft priorities
+  - [ ] Send updates
+  ```
+
+- The list's **first item** is the start item — no special marker on the item
+  itself. Checking it off starts the clock.
 - After the start item, checking off each subsequent item stops the clock for
   the interval that just elapsed and attributes that duration to the item just
   checked, then immediately starts timing the next one. So each item's

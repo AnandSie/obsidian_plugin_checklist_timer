@@ -2,8 +2,9 @@ import { App, PluginSettingTab, Setting } from 'obsidian';
 import ChecklistTimerPlugin from './main';
 
 export interface ChecklistTimerSettings {
-	// Checklists whose first item's text contains this tag are timed; that
-	// first item also doubles as the start item. See CLAUDE.md.
+	// A checklist is timed when the line immediately above it contains this
+	// tag (same convention as the Checklist plugin). The list's first item
+	// is the start item. See CLAUDE.md.
 	timedTag: string;
 	// Vault-relative folder for timing output notes. Empty = vault root.
 	outputFolder: string;
@@ -33,7 +34,7 @@ export class ChecklistTimerSettingTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName('Timed checklist tag')
 			.setDesc(
-				"A checklist is timed when its first item's text contains this tag. Checking that first item starts the timer.",
+				'A checklist is timed when the line right above it contains this tag. Checking the first item then starts the timer.',
 			)
 			.addText((text) =>
 				text
