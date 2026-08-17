@@ -4,8 +4,7 @@
 	"version": "1.0.0",
 	"minAppVersion": "1.4.0",
 	"description": "Times how long each checklist item takes to complete.",
-	"author": "",
-	"authorUrl": "",
-	"fundingUrl": "",
+	"author": "Anand Sie",
+	"authorUrl": "https://github.com/AnandSie",
 	"isDesktopOnly": true
 }
