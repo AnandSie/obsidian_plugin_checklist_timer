@@ -56,7 +56,15 @@ mechanism should feel familiar rather than inventing something new.
   the interval that just elapsed and attributes that duration to the item just
   checked, then immediately starts timing the next one. So each item's
   recorded time = time between the previous check-off and this one.
-- Only **one timer active at a time** — no parallel/concurrent items in v1.
+- Only **one timer active at a time**, vault-wide — no parallel/concurrent
+  checklists or items in v1.
+- If you start a second timed checklist while one is already running,
+  behavior is configurable (default: **auto-switch**): the first is stopped
+  automatically (saving whatever it had timed, marked `(stopped early)`) and
+  the second starts. Turning auto-switch off blocks the second checklist
+  instead — its check-offs are silently-in-effect but explicitly *not*
+  tracked, and the plugin says so via a notice on every check-off attempt
+  while blocked, not just the first, so this can't fail silently.
 - A session ends either when the last item in the checklist is checked, or via
   a manual stop action in the UI.
 - Because the start item is unambiguous (tagged, or first-by-default), there's

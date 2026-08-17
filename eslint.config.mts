@@ -29,4 +29,13 @@ export default defineConfig(
 		},
 	},
 	...obsidianmd.configs.recommended,
+	{
+		// node:test's describe()/it() are fire-and-forget registration calls by
+		// design, and test doubles legitimately cast plain objects to TFile.
+		files: ['**/*.test.ts'],
+		rules: {
+			'@typescript-eslint/no-floating-promises': 'off',
+			'obsidianmd/no-tfile-tfolder-cast': 'off',
+		},
+	},
 );

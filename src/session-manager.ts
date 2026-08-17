@@ -1,7 +1,8 @@
-import { App, Notice, TFile } from 'obsidian';
+import type { TFile } from 'obsidian';
 import { ChecklistBlock, findTimedBlocks, resolveStartIndex } from './utils/checklist';
 import { formatDuration, renderFilename } from './utils/format';
-import { ChecklistTimerSettings } from './settings';
+import { ChecklistTimerSettings } from './settings-schema';
+import { Notifier, VaultAccess } from './timer-port';
 
 interface TimedResult {
 	text: string;
@@ -25,18 +26,21 @@ interface ActiveSession {
 }
 
 // Tracks at most one running session across the whole vault (see CLAUDE.md:
-// "each item is only one item at a time in progress"). The output note is
-// written incrementally, one item at a time, so progress survives even if
-// the checklist is never finished (see CLAUDE.md: no session resume, but
-// completed items shouldn't be lost either).
+// "only one timer active at a time"). The output note is written
+// incrementally, one item at a time, so progress survives even if the
+// checklist is never finished. Starting a second timed checklist while one
+// is running either auto-switches to it or is blocked, per settings — see
+// handleItemChecked.
 export class SessionManager {
 	private activeSession: ActiveSession | null = null;
 	private readonly blockStateCache = new Map<string, boolean[]>();
 
 	constructor(
-		private readonly app: App,
+		private readonly vault: VaultAccess,
 		private settings: ChecklistTimerSettings,
 		private readonly onStatusChange: (status: string) => void,
+		private readonly notify: Notifier,
+		private readonly now: () => number = Date.now,
 	) {}
 
 	updateSettings(settings: ChecklistTimerSettings) {
@@ -85,47 +89,50 @@ export class SessionManager {
 		index: number,
 		startIndex: number,
 	) {
-		const now = Date.now();
-
 		if (index < startIndex) return;
 
+		const session = this.activeSession;
+		const isSameBlock =
+			session !== null &&
+			session.filePath === file.path &&
+			session.blockStartLine === block.startLine;
+
 		if (index === startIndex) {
-			if (this.activeSession) {
-				new Notice(
-					`Checklist timer: a timer is already running in "${this.activeSession.filePath}" — ignoring new start.`,
-				);
-				return;
+			if (session) {
+				if (isSameBlock) {
+					this.notify(`Checklist timer: "${session.title}" is already being timed.`);
+					return;
+				}
+				if (this.settings.autoSwitchSessions) {
+					this.notify(
+						`Checklist timer: starting a new checklist — stopping "${session.title}" first.`,
+					);
+					await this.finishSession('stopped');
+				} else {
+					this.notify(
+						`Checklist timer: "${session.title}" is already being timed — this checklist won't be tracked. Turn on auto-switch in settings to switch automatically instead.`,
+					);
+					return;
+				}
 			}
-			const title = file.basename;
-			this.activeSession = {
-				filePath: file.path,
-				blockStartLine: block.startLine,
-				lastEventTime: now,
-				title,
-				outputPath: this.resolveOutputPath(title),
-				outputFile: null,
-				results: [],
-			};
-			new Notice('Checklist timer: started.');
-			this.onStatusChange('Checklist timer: running');
+			this.startSession(file, block);
 			return;
 		}
 
-		const session = this.activeSession;
-		if (
-			!session ||
-			session.filePath !== file.path ||
-			session.blockStartLine !== block.startLine
-		) {
-			// No active session for this block — nothing to attribute time to.
+		if (!session || !isSameBlock) {
+			if (session) {
+				this.notify(
+					`Checklist timer: not tracked — "${session.title}" is currently being timed.`,
+				);
+			}
 			return;
 		}
 
 		const item = block.items[index];
 		if (!item) return;
 
-		const duration = now - session.lastEventTime;
-		session.lastEventTime = now;
+		const duration = this.now() - session.lastEventTime;
+		session.lastEventTime = this.now();
 		session.results.push({ text: item.text, durationMs: duration });
 
 		await this.appendItem(session, item.text, duration);
@@ -137,10 +144,25 @@ export class SessionManager {
 
 	async stopActiveSession() {
 		if (!this.activeSession) {
-			new Notice('Checklist timer: no active timer.');
+			this.notify('Checklist timer: no active timer.');
 			return;
 		}
 		await this.finishSession('stopped');
+	}
+
+	private startSession(file: TFile, block: ChecklistBlock) {
+		const title = file.basename;
+		this.activeSession = {
+			filePath: file.path,
+			blockStartLine: block.startLine,
+			lastEventTime: this.now(),
+			title,
+			outputPath: this.resolveOutputPath(title),
+			outputFile: null,
+			results: [],
+		};
+		this.notify('Checklist timer: started.');
+		this.onStatusChange(`Checklist timer: running (${title})`);
 	}
 
 	private resolveOutputPath(title: string): string {
@@ -154,19 +176,16 @@ export class SessionManager {
 		try {
 			if (!session.outputFile) {
 				const folder = this.settings.outputFolder.trim();
-				if (folder && !this.app.vault.getAbstractFileByPath(folder)) {
-					await this.app.vault.createFolder(folder).catch(() => {});
+				if (folder && !this.vault.getAbstractFileByPath(folder)) {
+					await this.vault.createFolder(folder).catch(() => {});
 				}
 				const header = `# Checklist timing — ${session.title}\n\n`;
-				session.outputFile = await this.app.vault.create(
-					session.outputPath,
-					header + line,
-				);
+				session.outputFile = await this.vault.create(session.outputPath, header + line);
 			} else {
-				await this.app.vault.append(session.outputFile, line);
+				await this.vault.append(session.outputFile, line);
 			}
 		} catch (err) {
-			new Notice(
+			this.notify(
 				`Checklist timer: failed to write to ${session.outputPath} (${String(err)})`,
 			);
 		}
@@ -179,7 +198,7 @@ export class SessionManager {
 		this.onStatusChange('');
 
 		if (!session.outputFile) {
-			new Notice('Checklist timer: stopped (no items timed).');
+			this.notify('Checklist timer: stopped (no items timed).');
 			return;
 		}
 
@@ -193,10 +212,10 @@ export class SessionManager {
 			`\nTotal: ${formatDuration(totalMs)}${suffix}\n\n` +
 			`## Sorted by duration (slowest first)\n\n${slowestFirstLines}\n`;
 		try {
-			await this.app.vault.append(session.outputFile, footer);
-			new Notice(`Checklist timer: saved timing to ${session.outputPath}`);
+			await this.vault.append(session.outputFile, footer);
+			this.notify(`Checklist timer: saved timing to ${session.outputPath}`);
 		} catch (err) {
-			new Notice(
+			this.notify(
 				`Checklist timer: failed to write total to ${session.outputPath} (${String(err)})`,
 			);
 		}

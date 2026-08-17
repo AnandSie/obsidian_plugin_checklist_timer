@@ -1,25 +1,9 @@
 import { App, PluginSettingTab, Setting } from 'obsidian';
 import ChecklistTimerPlugin from './main';
+import { ChecklistTimerSettings, DEFAULT_SETTINGS } from './settings-schema';
 
-export interface ChecklistTimerSettings {
-	// A checklist is timed when the line immediately above it contains this
-	// tag (same convention as the Checklist plugin). See CLAUDE.md.
-	timedTag: string;
-	// Within a timed checklist, whichever item's text contains this tag is
-	// the start item. If no item has it, the first item is the start item.
-	startTag: string;
-	// Vault-relative folder for timing output notes. Empty = vault root.
-	outputFolder: string;
-	// Supports {{date}} and {{title}} placeholders.
-	filenameTemplate: string;
-}
-
-export const DEFAULT_SETTINGS: ChecklistTimerSettings = {
-	timedTag: '#timed',
-	startTag: '#start',
-	outputFolder: '',
-	filenameTemplate: '{{date}} {{title}} timing',
-};
+export type { ChecklistTimerSettings };
+export { DEFAULT_SETTINGS };
 
 export class ChecklistTimerSettingTab extends PluginSettingTab {
 	plugin: ChecklistTimerPlugin;
@@ -58,6 +42,20 @@ export class ChecklistTimerSettingTab extends PluginSettingTab {
 					.setValue(this.plugin.settings.startTag)
 					.onChange(async (value) => {
 						this.plugin.settings.startTag = value.trim() || '#start';
+						await this.plugin.saveSettings();
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName('Auto-switch between checklists')
+			.setDesc(
+				'If you start a new timed checklist while another is still running, automatically stop the first (saving what it had timed so far) and start the new one. Turn this off to block the new checklist instead, leaving the first one running.',
+			)
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.autoSwitchSessions)
+					.onChange(async (value) => {
+						this.plugin.settings.autoSwitchSessions = value;
 						await this.plugin.saveSettings();
 					}),
 			);
