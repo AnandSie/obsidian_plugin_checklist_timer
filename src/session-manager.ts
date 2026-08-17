@@ -1,5 +1,5 @@
 import { App, Notice, TFile } from 'obsidian';
-import { ChecklistBlock, findTimedBlocks } from './utils/checklist';
+import { ChecklistBlock, findTimedBlocks, resolveStartIndex } from './utils/checklist';
 import { formatDuration, renderFilename } from './utils/format';
 import { ChecklistTimerSettings } from './settings';
 
@@ -61,8 +61,9 @@ export class SessionManager {
 			if (checked && !previousState[index]) newlyChecked.push(index);
 		});
 
+		const startIndex = resolveStartIndex(block, this.settings.startTag);
 		for (const index of newlyChecked) {
-			await this.handleItemChecked(file, block, index);
+			await this.handleItemChecked(file, block, index, startIndex);
 		}
 	}
 
@@ -70,10 +71,13 @@ export class SessionManager {
 		file: TFile,
 		block: ChecklistBlock,
 		index: number,
+		startIndex: number,
 	) {
 		const now = Date.now();
 
-		if (index === 0) {
+		if (index < startIndex) return;
+
+		if (index === startIndex) {
 			if (this.activeSession) {
 				new Notice(
 					`Checklist timer: a timer is already running in "${this.activeSession.filePath}" — ignoring new start.`,

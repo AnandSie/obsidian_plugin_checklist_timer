@@ -48,8 +48,7 @@ export function parseChecklistBlocks(content: string): ChecklistBlock[] {
 }
 
 // A block is "timed" when the line immediately above it carries the
-// configured tag — the same convention the Checklist plugin uses. The
-// block's first item (not the tag line) is the start item.
+// configured tag — the same convention the Checklist plugin uses.
 export function findTimedBlocks(
 	content: string,
 	tag: string,
@@ -59,4 +58,14 @@ export function findTimedBlocks(
 		const precedingLine = lines[block.startLine - 1];
 		return precedingLine !== undefined && precedingLine.includes(tag);
 	});
+}
+
+// The start item is whichever item's text carries the start tag; if none
+// does, the block's first item is the start item (so tagging is optional).
+export function resolveStartIndex(
+	block: ChecklistBlock,
+	startTag: string,
+): number {
+	const tagged = block.items.findIndex((item) => item.text.includes(startTag));
+	return tagged === -1 ? 0 : tagged;
 }

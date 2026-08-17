@@ -3,9 +3,11 @@ import ChecklistTimerPlugin from './main';
 
 export interface ChecklistTimerSettings {
 	// A checklist is timed when the line immediately above it contains this
-	// tag (same convention as the Checklist plugin). The list's first item
-	// is the start item. See CLAUDE.md.
+	// tag (same convention as the Checklist plugin). See CLAUDE.md.
 	timedTag: string;
+	// Within a timed checklist, whichever item's text contains this tag is
+	// the start item. If no item has it, the first item is the start item.
+	startTag: string;
 	// Vault-relative folder for timing output notes. Empty = vault root.
 	outputFolder: string;
 	// Supports {{date}} and {{title}} placeholders.
@@ -14,6 +16,7 @@ export interface ChecklistTimerSettings {
 
 export const DEFAULT_SETTINGS: ChecklistTimerSettings = {
 	timedTag: '#timed',
+	startTag: '#start',
 	outputFolder: '',
 	filenameTemplate: '{{date}} {{title}} timing',
 };
@@ -33,15 +36,28 @@ export class ChecklistTimerSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName('Timed checklist tag')
-			.setDesc(
-				'A checklist is timed when the line right above it contains this tag. Checking the first item then starts the timer.',
-			)
+			.setDesc('A checklist is timed when the line right above it contains this tag.')
 			.addText((text) =>
 				text
 					.setPlaceholder('#timed')
 					.setValue(this.plugin.settings.timedTag)
 					.onChange(async (value) => {
 						this.plugin.settings.timedTag = value.trim() || '#timed';
+						await this.plugin.saveSettings();
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName('Start item tag')
+			.setDesc(
+				"Within a timed checklist, the item whose text contains this tag starts the timer. If no item has it, the checklist's first item starts it instead.",
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder('#start')
+					.setValue(this.plugin.settings.startTag)
+					.onChange(async (value) => {
+						this.plugin.settings.startTag = value.trim() || '#start';
 						await this.plugin.saveSettings();
 					}),
 			);
