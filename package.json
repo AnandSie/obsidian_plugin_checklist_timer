@@ -1,6 +1,6 @@
 {
 	"name": "obsidian-checklist-timer",
-	"version": "1.0.3",
+	"version": "1.0.4",
 	"description": "Times how long each checklist item takes to complete.",
 	"main": "main.js",
 	"type": "module",
