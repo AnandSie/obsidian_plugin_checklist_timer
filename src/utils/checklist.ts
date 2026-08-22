@@ -48,24 +48,29 @@ export function parseChecklistBlocks(content: string): ChecklistBlock[] {
 }
 
 // A block is "timed" when the line immediately above it carries the
-// configured tag — the same convention the Checklist plugin uses.
+// configured tag — the same convention the Checklist plugin uses. Matched
+// case-insensitively, since Obsidian's own tag system treats e.g. #Timed
+// and #timed as the same tag.
 export function findTimedBlocks(
 	content: string,
 	tag: string,
 ): ChecklistBlock[] {
 	const lines = content.split('\n');
+	const needle = tag.toLowerCase();
 	return parseChecklistBlocks(content).filter((block) => {
 		const precedingLine = lines[block.startLine - 1];
-		return precedingLine !== undefined && precedingLine.includes(tag);
+		return precedingLine !== undefined && precedingLine.toLowerCase().includes(needle);
 	});
 }
 
 // The start item is whichever item's text carries the start tag; if none
 // does, the block's first item is the start item (so tagging is optional).
+// Matched case-insensitively — see findTimedBlocks above.
 export function resolveStartIndex(
 	block: ChecklistBlock,
 	startTag: string,
 ): number {
-	const tagged = block.items.findIndex((item) => item.text.includes(startTag));
+	const needle = startTag.toLowerCase();
+	const tagged = block.items.findIndex((item) => item.text.toLowerCase().includes(needle));
 	return tagged === -1 ? 0 : tagged;
 }

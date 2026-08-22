@@ -150,12 +150,22 @@ identifying checklists) over inventing a new mechanism.
   string (we have no funding link, per "no monetization" above).
 - **The community-directory automated review returns warnings/recommendations
   even on an accepted submission**, not just hard blockers. First round for
-  v1.0.0: a warning to adopt `getSettingDefinitions()` (see backlog — it's
-  genuinely not implementable yet, not a fixable oversight) and a
-  recommendation to add a release description (we did, manually, since there's
-  no way to script that without a GitHub token in this dev setup).
+  v1.0.0: a warning to adopt `getSettingDefinitions()` (implemented since —
+  see release history) and a recommendation to add a release description (we
+  did, manually, since there's no way to script that without a GitHub token
+  in this dev setup).
 - **Every new release needs its own version bump**, even a docs-only change —
   GitHub tags and Obsidian plugin versions must be unique per release.
+- **`getSettingDefinitions()` was implemented on `ChecklistTimerSettingTab`**
+  (src/settings.ts) alongside the existing imperative `display()`, not
+  instead of it — `manifest.json`'s `minAppVersion` (1.4.0) is below 1.13.0,
+  so `display()` stays as the fallback for older Obsidian while
+  `getSettingDefinitions()` takes over on 1.13.0+ ("dual support", per
+  `eslint-plugin-obsidianmd`'s own `no-deprecated-display` rule). Any new
+  setting added going forward needs entries in **both** `display()` and
+  `getSettingDefinitions()`, and — since the declarative control types have
+  no `onChange` hook — any trim/default-fallback logic goes in the
+  `setControlValue()` override instead of inline.
 
 ## Backlog (explicitly not v1)
 
@@ -166,8 +176,3 @@ identifying checklists) over inventing a new mechanism.
 - Configurable duration granularity (minutes-only, milliseconds).
 - Filename templates that integrate with existing note templates (e.g.
   Templater).
-- Adopt `PluginSettingTab#getSettingDefinitions()` (the declarative settings
-  API) once Obsidian actually documents/types it — as of this writing it only
-  exists starting at Obsidian 1.13.0, has no published docs, and isn't in the
-  installed `obsidian` types package, so implementing it now would mean
-  guessing blind at an undocumented shape.

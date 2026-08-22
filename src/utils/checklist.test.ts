@@ -76,6 +76,12 @@ describe('findTimedBlocks', () => {
 		assert.equal(findTimedBlocks(content, '#my-process').length, 1);
 		assert.equal(findTimedBlocks(content, '#timed').length, 0);
 	});
+
+	it('matches the tag case-insensitively, like Obsidian\'s own tag system', () => {
+		const content = '#Timed\n- [ ] Start\n- [ ] Next\n';
+		assert.equal(findTimedBlocks(content, '#timed').length, 1);
+		assert.equal(findTimedBlocks(content, '#TIMED').length, 1);
+	});
 });
 
 describe('resolveStartIndex', () => {
@@ -95,6 +101,13 @@ describe('resolveStartIndex', () => {
 
 	it('uses the first matching item if the start tag appears more than once', () => {
 		const content = '#timed\n- [ ] A\n- [ ] #start B\n- [ ] #start C\n';
+		const block = findTimedBlocks(content, '#timed')[0];
+		assert.ok(block);
+		assert.equal(resolveStartIndex(block, '#start'), 1);
+	});
+
+	it('matches the start tag case-insensitively', () => {
+		const content = '#timed\n- [ ] Prep\n- [ ] #Start Kickoff\n- [ ] Middle\n';
 		const block = findTimedBlocks(content, '#timed')[0];
 		assert.ok(block);
 		assert.equal(resolveStartIndex(block, '#start'), 1);
