@@ -27,7 +27,20 @@ export default class ChecklistTimerPlugin extends Plugin {
 			this.app.vault,
 			this.settings,
 			(status) => this.statusBarItemEl.setText(status),
-			(message) => new Notice(message),
+			(message, options) => {
+				const notice = new Notice(message, options?.durationMs);
+				const filePath = options?.filePath;
+				if (!filePath) return;
+				// noticeEl (not the 1.8.7+ messageEl) so click-to-open still works
+				// down to this plugin's minAppVersion.
+				notice.noticeEl.addClass('checklist-timer-clickable-notice');
+				notice.noticeEl.addEventListener('click', () => {
+					const file = this.app.vault.getAbstractFileByPath(filePath);
+					if (file instanceof TFile) {
+						void this.app.workspace.getLeaf(false).openFile(file);
+					}
+				});
+			},
 			Date.now,
 			normalizePath,
 		);
