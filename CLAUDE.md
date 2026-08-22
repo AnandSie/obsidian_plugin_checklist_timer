@@ -167,6 +167,34 @@ identifying checklists) over inventing a new mechanism.
   no `onChange` hook — any trim/default-fallback logic goes in the
   `setControlValue()` override instead of inline.
 
+## Known issues / possible bugs (unconfirmed)
+
+- **Output note may lose lines if it's open in an editor while the plugin is
+  still appending to it.** `SessionManager.appendItem`/`finishSession` write
+  via `vault.append()` (a direct disk write) on every check-off. If the
+  output note is *also* open in a pane during an active session, Obsidian's
+  editor holds its own in-memory copy of that note; if the editor's copy
+  gets saved back to disk after the plugin has appended new lines, it can
+  overwrite (silently discard) those lines, since the editor's buffer is
+  stale relative to the plugin's direct writes. Mirrors a related bug that
+  *was* confirmed and fixed (see release history / git log around
+  2026-08-22): checking off items via the Checklist plugin's sidebar (or
+  Reading View) writes to the *checklist* note directly too, bypassing any
+  open editor there — that one turned out to be real and was fixed by also
+  listening to `vault.on('modify')` instead of relying solely on
+  `editor-change`. This output-note variant is the mirror case (plugin
+  writing to a file that's open elsewhere) and has not been reproduced, only
+  reasoned through — no fix applied yet.
+  - Likely fix if confirmed: before appending, check whether the output note
+    is open in any pane (`workspace.iterateAllLeaves`); if so, write through
+    that `Editor` (e.g. `editor.replaceRange` at end-of-document) instead of
+    `vault.append()`, so there's only one owner of the file's content at a
+    time. Can't be covered by the existing `node:test` suite the way
+    `SessionManager` is (needs a real Obsidian `Editor`/`MarkdownView`,
+    unavailable outside the app — see `timer-port.ts`), so verifying it means
+    testing by hand in the dev vault: open the output note mid-session, keep
+    checking off items, confirm nothing goes missing.
+
 ## Backlog (explicitly not v1)
 
 - Nested/indented checklist time rollup.
