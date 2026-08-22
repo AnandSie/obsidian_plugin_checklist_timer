@@ -10,10 +10,11 @@ It's a process-insight tool for repeatable checklists.
 ## How it works
 
 Mark a checklist as timed with a tag on its own line directly above the
-list (default `#timed`, configurable in settings):
+list (default `#Timed`, configurable in settings — matched
+case-insensitively, so `#timed` works too):
 
 ```
-#timed
+#Timed
 - [ ] Start week plan
 - [ ] Review calendar
 - [ ] Draft priorities
@@ -25,13 +26,13 @@ next item, the time since the previous check-off is recorded against it,
 and timing continues automatically through the rest of the list.
 
 Want a different item to be the starting point instead of the first one?
-Tag it with `#start` (also configurable) anywhere in the list — items
+Tag it with `#Start` (also configurable) anywhere in the list — items
 before it are simply not timed:
 
 ```
-#timed
+#Timed
 - [ ] Gather notes (not timed)
-- [ ] #start Kickoff
+- [ ] #Start Kickoff
 - [ ] Next step
 ```
 
@@ -47,8 +48,8 @@ what it had timed) and the second starts — this is configurable.
 
 ## Settings
 
-- **Timed checklist tag** — marks a checklist as timed (default `#timed`).
-- **Start item tag** — marks the start item within a timed checklist (default `#start`).
+- **Timed checklist tag** — marks a checklist as timed (default `#Timed`, matched case-insensitively).
+- **Start item tag** — marks the start item within a timed checklist (default `#Start`, matched case-insensitively).
 - **Auto-switch between checklists** — automatically stop-and-switch when a second timed checklist is started while one is running, instead of blocking it (default on).
 - **Output folder** — where timing notes are saved (default: vault root).
 - **Filename template** — supports `{{date}}` and `{{title}}` placeholders.

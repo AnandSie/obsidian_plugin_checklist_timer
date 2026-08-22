@@ -26,7 +26,7 @@ export class ChecklistTimerSettingTab extends PluginSettingTab {
 				control: {
 					type: 'text',
 					key: 'timedTag',
-					placeholder: '#timed',
+					placeholder: DEFAULT_SETTINGS.timedTag,
 				},
 			},
 			{
@@ -35,7 +35,7 @@ export class ChecklistTimerSettingTab extends PluginSettingTab {
 				control: {
 					type: 'text',
 					key: 'startTag',
-					placeholder: '#start',
+					placeholder: DEFAULT_SETTINGS.startTag,
 				},
 			},
 			{
@@ -108,10 +108,10 @@ export class ChecklistTimerSettingTab extends PluginSettingTab {
 			.setDesc('A checklist is timed when the line right above it contains this tag.')
 			.addText((text) =>
 				text
-					.setPlaceholder('#timed')
+					.setPlaceholder(DEFAULT_SETTINGS.timedTag)
 					.setValue(this.plugin.settings.timedTag)
 					.onChange(async (value) => {
-						this.plugin.settings.timedTag = value.trim() || '#timed';
+						this.plugin.settings.timedTag = value.trim() || DEFAULT_SETTINGS.timedTag;
 						await this.plugin.saveSettings();
 					}),
 			);
@@ -123,10 +123,10 @@ export class ChecklistTimerSettingTab extends PluginSettingTab {
 			)
 			.addText((text) =>
 				text
-					.setPlaceholder('#start')
+					.setPlaceholder(DEFAULT_SETTINGS.startTag)
 					.setValue(this.plugin.settings.startTag)
 					.onChange(async (value) => {
-						this.plugin.settings.startTag = value.trim() || '#start';
+						this.plugin.settings.startTag = value.trim() || DEFAULT_SETTINGS.startTag;
 						await this.plugin.saveSettings();
 					}),
 			);

@@ -22,8 +22,8 @@ export interface ChecklistTimerSettings {
 }
 
 export const DEFAULT_SETTINGS: ChecklistTimerSettings = {
-	timedTag: '#timed',
-	startTag: '#start',
+	timedTag: '#Timed',
+	startTag: '#Start',
 	autoSwitchSessions: true,
 	outputFolder: '',
 	filenameTemplate: '{{date}} {{title}} timing',
