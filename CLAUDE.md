@@ -120,6 +120,43 @@ and plugins rather than a walled-off silo. When in doubt, prefer the
 convention an existing well-known Obsidian plugin already uses (e.g. tags for
 identifying checklists) over inventing a new mechanism.
 
+## Release process (learnings from getting v1.0.0 published)
+
+- **Version bump order matters.** `version-bump.mjs` (run via `npm run
+  version`) reads the *target* version from `process.env.npm_package_version`,
+  i.e. from `package.json`'s already-updated `version` field — it does not
+  take a version as an argument. So the sequence is: `npm version patch
+  --no-git-tag-version` (bumps `package.json`/`package-lock.json` without
+  creating a git tag) → `npm run version` (propagates that into
+  `manifest.json` and adds a `versions.json` entry) → commit.
+- **`versions.json` maps plugin version → `minAppVersion`, not version →
+  itself.** The template ships a placeholder (`"1.0.0": "1.0.0"`) that's easy
+  to leave un-audited. `version-bump.mjs` only *adds* a new entry for a new
+  version — it never corrects an existing one, so if `minAppVersion` changes
+  (e.g. a new Vault API bumps the floor), double check old entries by hand.
+- **The release tag must exactly match `manifest.json`'s `version` — no
+  leading `v`.** `.github/workflows/release.yml` triggers on any pushed tag
+  (`tags: '*'`), so the tag string itself is what becomes the release; it
+  doesn't cross-check against the manifest.
+- **The release workflow builds fresh in CI** (`npm ci && npm run build`), so
+  local build state never matters — but it also means CI needs the repo in a
+  state that actually builds cleanly.
+- **The workflow creates the release as a draft, on purpose.** Nothing is
+  public until someone manually clicks "Publish release" on GitHub. Easy
+  step to forget — a pushed tag alone does not make a version installable.
+- **`manifest.json`'s `author` field is required**, not optional, per the
+  manifest schema — the sample template ships it blank. `authorUrl` and
+  `fundingUrl` are optional; omit them entirely rather than leaving an empty
+  string (we have no funding link, per "no monetization" above).
+- **The community-directory automated review returns warnings/recommendations
+  even on an accepted submission**, not just hard blockers. First round for
+  v1.0.0: a warning to adopt `getSettingDefinitions()` (see backlog — it's
+  genuinely not implementable yet, not a fixable oversight) and a
+  recommendation to add a release description (we did, manually, since there's
+  no way to script that without a GitHub token in this dev setup).
+- **Every new release needs its own version bump**, even a docs-only change —
+  GitHub tags and Obsidian plugin versions must be unique per release.
+
 ## Backlog (explicitly not v1)
 
 - Nested/indented checklist time rollup.
@@ -129,3 +166,8 @@ identifying checklists) over inventing a new mechanism.
 - Configurable duration granularity (minutes-only, milliseconds).
 - Filename templates that integrate with existing note templates (e.g.
   Templater).
+- Adopt `PluginSettingTab#getSettingDefinitions()` (the declarative settings
+  API) once Obsidian actually documents/types it — as of this writing it only
+  exists starting at Obsidian 1.13.0, has no published docs, and isn't in the
+  installed `obsidian` types package, so implementing it now would mean
+  guessing blind at an undocumented shape.

@@ -80,9 +80,16 @@ timed and written to the note is safe.
 
 ## Installation
 
-Not yet on the community plugin list. To install manually:
+Available from Obsidian's Community Plugins:
 
-1. Download `main.js` and `manifest.json` from the latest release at
+1. Settings → Community plugins → Browse.
+2. Search for "Checklist Timer".
+3. Install, then enable it.
+
+To manually install a specific release instead (e.g. to try a version
+before it's landed in Community Plugins):
+
+1. Download `main.js` and `manifest.json` from the desired release at
    https://github.com/AnandSie/obsidian_plugin_checklist_timer/releases
 2. Create a folder named `checklist-timer` inside `<YourVault>/.obsidian/plugins/`.
 3. Copy both files into that folder.
