@@ -11,6 +11,8 @@ import type { NotifyOptions, VaultAccess } from './timer-port';
 class FakeVault implements VaultAccess {
 	files = new Map<string, string>();
 	folders = new Set<string>();
+	// Test hook: makes the next append() call reject, to exercise write-failure paths.
+	failNextAppend = false;
 
 	getAbstractFileByPath(path: string): unknown {
 		if (this.files.has(path) || this.folders.has(path)) return { path };
@@ -29,6 +31,10 @@ class FakeVault implements VaultAccess {
 	}
 
 	async append(file: TFile, content: string): Promise<void> {
+		if (this.failNextAppend) {
+			this.failNextAppend = false;
+			throw new Error('simulated disk error');
+		}
 		const path = (file as unknown as { path: string }).path;
 		const existing = this.files.get(path);
 		if (existing === undefined) throw new Error(`append to missing file: ${path}`);
@@ -209,6 +215,33 @@ describe('SessionManager — basic sequential timing', () => {
 		assert.ok(
 			(noticeOptions[finishIndex]?.durationMs ?? 0) > 5000,
 			'the finish notice should stay visible longer than Obsidian’s default',
+		);
+	});
+
+	it('does not fire a misleading per-item notice when the write actually fails', async () => {
+		const { manager, notices } = makeManager(vault, clock);
+		const file = sourceFile('Week Plan.md');
+
+		await manager.handleFileContent(file, '#timed\n- [ ] Start\n- [ ] Two\n- [ ] Three\n');
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [ ] Two\n- [ ] Three\n');
+
+		// First item creates the file successfully...
+		clock.advance(1_000);
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n- [ ] Three\n');
+		assert.ok(notices.some((n) => n.includes('⏱ Two:')));
+
+		// ...but the append for the second item fails.
+		vault.failNextAppend = true;
+		clock.advance(1_000);
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n- [x] Three\n');
+
+		assert.ok(
+			notices.some((n) => n.includes('failed to write to')),
+			'the failure must be reported',
+		);
+		assert.ok(
+			!notices.some((n) => n.includes('⏱ Three:')),
+			'no success-looking notice should fire for an item that was never actually saved',
 		);
 	});
 

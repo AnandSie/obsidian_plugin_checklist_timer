@@ -149,8 +149,10 @@ export class SessionManager {
 		session.lastEventTime = this.now();
 		session.results.push({ text: item.text, durationMs: duration });
 
-		await this.appendItem(session, item.text, duration);
-		this.notify(`⏱ ${item.text}: ${formatDuration(duration)}`, this.resultFileOptions(session));
+		const wrote = await this.appendItem(session, item.text, duration);
+		if (wrote) {
+			this.notify(`⏱ ${item.text}: ${formatDuration(duration)}`, this.resultFileOptions(session));
+		}
 
 		if (index === block.items.length - 1) {
 			await this.finishSession('completed');
@@ -192,7 +194,11 @@ export class SessionManager {
 		return this.normalizePath(rawPath);
 	}
 
-	private async appendItem(session: ActiveSession, text: string, durationMs: number) {
+	private async appendItem(
+		session: ActiveSession,
+		text: string,
+		durationMs: number,
+	): Promise<boolean> {
 		const line = `- ${text}: ${formatDuration(durationMs)}\n`;
 		try {
 			if (!session.outputFile) {
@@ -210,11 +216,13 @@ export class SessionManager {
 			} else {
 				await this.vault.append(session.outputFile, line);
 			}
+			return true;
 		} catch (err) {
 			this.notify(
 				`Checklist timer: failed to write to ${session.outputPath} (${String(err)})`,
 				this.resultFileOptions(session),
 			);
+			return false;
 		}
 	}
 
@@ -224,7 +232,8 @@ export class SessionManager {
 		this.activeSession = null;
 		this.onStatusChange('');
 
-		if (!session.outputFile) {
+		const outputFile = session.outputFile;
+		if (!outputFile) {
 			this.notify('Checklist timer: stopped (no items timed).');
 			return;
 		}
@@ -239,15 +248,15 @@ export class SessionManager {
 			`\nTotal: ${formatDuration(totalMs)}${suffix}\n\n` +
 			`## Sorted by duration (slowest first)\n\n${slowestFirstLines}\n`;
 		try {
-			await this.vault.append(session.outputFile, footer);
+			await this.vault.append(outputFile, footer);
 			this.notify(
 				`✅ "${session.title}" finished in ${formatDuration(totalMs)}${suffix} — click to open results`,
-				{ filePath: session.outputPath, durationMs: FINISH_NOTICE_DURATION_MS },
+				{ filePath: outputFile.path, durationMs: FINISH_NOTICE_DURATION_MS },
 			);
 		} catch (err) {
 			this.notify(
 				`Checklist timer: failed to write total to ${session.outputPath} (${String(err)})`,
-				{ filePath: session.outputPath },
+				{ filePath: outputFile.path },
 			);
 		}
 	}
@@ -257,6 +266,9 @@ export class SessionManager {
 	// ActiveSession.outputFile), so early-session notices have nothing to
 	// point to yet.
 	private resultFileOptions(session: ActiveSession): NotifyOptions | undefined {
-		return session.outputFile ? { filePath: session.outputPath } : undefined;
+		// .path (not the once-computed outputPath) so a click still resolves
+		// correctly even if the note was renamed/moved mid-session — Obsidian
+		// updates a TFile's .path in place rather than issuing a new object.
+		return session.outputFile ? { filePath: session.outputFile.path } : undefined;
 	}
 }
