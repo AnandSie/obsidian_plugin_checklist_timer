@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import type { TFile } from 'obsidian';
 import { SessionManager } from './session-manager';
 import { DEFAULT_SETTINGS, ChecklistTimerSettings } from './settings-schema';
-import type { VaultAccess } from './timer-port';
+import type { NotifyOptions, VaultAccess } from './timer-port';
 
 // In-memory stand-in for Obsidian's Vault — real TFile objects are opaque to
 // SessionManager (it never inspects them beyond passing them back into
@@ -11,6 +11,8 @@ import type { VaultAccess } from './timer-port';
 class FakeVault implements VaultAccess {
 	files = new Map<string, string>();
 	folders = new Set<string>();
+	// Test hook: makes the next append() call reject, to exercise write-failure paths.
+	failNextAppend = false;
 
 	getAbstractFileByPath(path: string): unknown {
 		if (this.files.has(path) || this.folders.has(path)) return { path };
@@ -29,6 +31,10 @@ class FakeVault implements VaultAccess {
 	}
 
 	async append(file: TFile, content: string): Promise<void> {
+		if (this.failNextAppend) {
+			this.failNextAppend = false;
+			throw new Error('simulated disk error');
+		}
 		const path = (file as unknown as { path: string }).path;
 		const existing = this.files.get(path);
 		if (existing === undefined) throw new Error(`append to missing file: ${path}`);
@@ -64,17 +70,21 @@ function makeManager(
 	normalizePath: (path: string) => string = (path) => path,
 ) {
 	const notices: string[] = [];
+	const noticeOptions: (NotifyOptions | undefined)[] = [];
 	const statuses: string[] = [];
 	const settings: ChecklistTimerSettings = { ...DEFAULT_SETTINGS, ...overrides };
 	const manager = new SessionManager(
 		vault,
 		settings,
 		(status) => statuses.push(status),
-		(message) => notices.push(message),
+		(message, options) => {
+			notices.push(message);
+			noticeOptions.push(options);
+		},
 		clock.now,
 		normalizePath,
 	);
-	return { manager, notices, statuses };
+	return { manager, notices, noticeOptions, statuses };
 }
 
 describe('SessionManager — basic sequential timing', () => {
@@ -95,7 +105,7 @@ describe('SessionManager — basic sequential timing', () => {
 		assert.equal(vault.files.size, 0, 'baseline scan must not fire events');
 
 		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [ ] Two\n- [ ] Three\n');
-		assert.ok(notices.includes('Checklist timer: started.'));
+		assert.ok(notices.includes('▶️ "Week Plan" started'));
 		assert.equal(vault.files.size, 0, 'starting the clock does not create the note yet');
 
 		clock.advance(5_000);
@@ -118,7 +128,7 @@ describe('SessionManager — basic sequential timing', () => {
 				'- Two: 00:00:05\n' +
 				'- Three: 00:00:03\n',
 		);
-		assert.ok(notices.some((n) => n.includes('saved timing to')));
+		assert.ok(notices.some((n) => n.includes('finished in') && n.includes('click to open')));
 	});
 
 	it('does not time items before the start item', async () => {
@@ -161,7 +171,9 @@ describe('SessionManager — basic sequential timing', () => {
 		const content = vault.findContent('Note timing');
 		assert.ok(content?.includes('Total: 00:00:10 (stopped early)'));
 		assert.ok(!content?.includes('Three'), 'unchecked item must not appear');
-		assert.ok(notices.some((n) => n.includes('saved timing to')));
+		assert.ok(
+			notices.some((n) => n.includes('finished in') && n.includes('(stopped early)')),
+		);
 	});
 
 	it('stopping with nothing timed writes no file', async () => {
@@ -174,6 +186,63 @@ describe('SessionManager — basic sequential timing', () => {
 
 		assert.equal(vault.files.size, 0);
 		assert.ok(notices.includes('Checklist timer: stopped (no items timed).'));
+	});
+
+	it('finishing fires a single clickable notice with the duration and a longer timeout', async () => {
+		const { manager, notices, noticeOptions } = makeManager(vault, clock);
+		const file = sourceFile('Week Plan.md');
+
+		await manager.handleFileContent(file, '#timed\n- [ ] Start\n- [ ] Two\n');
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [ ] Two\n');
+		clock.advance(7_000);
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n');
+
+		const finishIndex = notices.findIndex((n) => n.includes('finished in 00:00:07'));
+		assert.notEqual(finishIndex, -1, 'a single finish notice with the total duration should fire');
+		assert.ok(notices[finishIndex]?.includes('click to open'), 'it should read as a CTA');
+		assert.equal(
+			notices.filter((n) => n.includes('finished in') || n.includes('saved timing to')).length,
+			1,
+			'only one notice should fire at session end, not two',
+		);
+
+		const outputPath = [...vault.files.keys()][0];
+		assert.equal(
+			noticeOptions[finishIndex]?.filePath,
+			outputPath,
+			'the finish notice should carry the output path so it can be opened on click',
+		);
+		assert.ok(
+			(noticeOptions[finishIndex]?.durationMs ?? 0) > 5000,
+			'the finish notice should stay visible longer than Obsidian’s default',
+		);
+	});
+
+	it('does not fire a misleading per-item notice when the write actually fails', async () => {
+		const { manager, notices } = makeManager(vault, clock);
+		const file = sourceFile('Week Plan.md');
+
+		await manager.handleFileContent(file, '#timed\n- [ ] Start\n- [ ] Two\n- [ ] Three\n');
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [ ] Two\n- [ ] Three\n');
+
+		// First item creates the file successfully...
+		clock.advance(1_000);
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n- [ ] Three\n');
+		assert.ok(notices.some((n) => n.includes('⏱ Two:')));
+
+		// ...but the append for the second item fails.
+		vault.failNextAppend = true;
+		clock.advance(1_000);
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n- [x] Three\n');
+
+		assert.ok(
+			notices.some((n) => n.includes('failed to write to')),
+			'the failure must be reported',
+		);
+		assert.ok(
+			!notices.some((n) => n.includes('⏱ Three:')),
+			'no success-looking notice should fire for an item that was never actually saved',
+		);
 	});
 
 	it('stopActiveSession with no session running just notifies', async () => {
@@ -210,8 +279,8 @@ describe('SessionManager — two checklists started while one is running', () =>
 			notices.some((n) => n.includes('stopping "Checklist A" first')),
 			'should explain why A was stopped',
 		);
-		assert.ok(notices.some((n) => n.includes('saved timing to')), 'A must be saved');
-		assert.ok(notices.includes('Checklist timer: started.'), 'B must start');
+		assert.ok(notices.some((n) => n.includes('finished in')), 'A must be saved');
+		assert.ok(notices.includes('▶️ "Checklist B" started'), 'B must start');
 
 		const aContent = vault.findContent('Checklist A timing');
 		assert.ok(aContent?.includes('Total: 00:00:02 (stopped early)'));
@@ -257,6 +326,41 @@ describe('SessionManager — two checklists started while one is running', () =>
 		const aContent = vault.findContent('Checklist A timing');
 		assert.ok(aContent?.includes('Total: 00:00:06\n'));
 		assert.ok(!aContent?.includes('stopped early'));
+	});
+
+	it('carries the output path on notices once a file exists, but not before', async () => {
+		const { manager, notices, noticeOptions } = makeManager(vault, clock, {
+			autoSwitchSessions: false,
+		});
+		const fileA = sourceFile('Checklist A.md');
+		const fileB = sourceFile('Checklist B.md');
+
+		await manager.handleFileContent(fileA, '#timed\n- [ ] Start\n- [ ] Two\n- [ ] Three\n');
+		await manager.handleFileContent(fileA, '#timed\n- [x] Start\n- [ ] Two\n- [ ] Three\n');
+		await manager.handleFileContent(fileB, '#timed\n- [ ] Kickoff\n- [ ] Wrap up\n');
+		await manager.handleFileContent(fileB, '#timed\n- [x] Kickoff\n- [ ] Wrap up\n');
+
+		const notTrackedYetIndex = notices.findIndex((n) => n.includes("won't be tracked"));
+		assert.notEqual(notTrackedYetIndex, -1);
+		assert.equal(
+			noticeOptions[notTrackedYetIndex]?.filePath,
+			undefined,
+			'A has no timed items yet, so there is nothing to open',
+		);
+
+		// "Two" is not A's last item, so A stays active (with an output file now).
+		clock.advance(4_000);
+		await manager.handleFileContent(fileA, '#timed\n- [x] Start\n- [x] Two\n- [ ] Three\n');
+		const outputPath = [...vault.files.keys()][0];
+
+		// B is still blocked; now A has a real output file to point to.
+		await manager.handleFileContent(fileB, '#timed\n- [ ] Kickoff\n- [ ] Wrap up\n');
+		await manager.handleFileContent(fileB, '#timed\n- [x] Kickoff\n- [ ] Wrap up\n');
+		const notTrackedIndex = notices.findIndex(
+			(n, i) => n.includes("won't be tracked") && i > notTrackedYetIndex,
+		);
+		assert.notEqual(notTrackedIndex, -1);
+		assert.equal(noticeOptions[notTrackedIndex]?.filePath, outputPath);
 	});
 
 	it('re-checking the start item of the already-active checklist is a no-op, not a restart', async () => {

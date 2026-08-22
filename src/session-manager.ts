@@ -2,7 +2,12 @@ import type { TFile } from 'obsidian';
 import { ChecklistBlock, findTimedBlocks, resolveStartIndex } from './utils/checklist';
 import { formatDuration, renderFilename } from './utils/format';
 import { ChecklistTimerSettings } from './settings-schema';
-import { Notifier, VaultAccess } from './timer-port';
+import { Notifier, NotifyOptions, VaultAccess } from './timer-port';
+
+// Obsidian's default notice timeout is short (~5s); the finish notice is a
+// clickable CTA to open the result note, so give the user more time to
+// notice and click it.
+const FINISH_NOTICE_DURATION_MS = 10_000;
 
 interface TimedResult {
 	text: string;
@@ -103,17 +108,22 @@ export class SessionManager {
 		if (index === startIndex) {
 			if (session) {
 				if (isSameBlock) {
-					this.notify(`Checklist timer: "${session.title}" is already being timed.`);
+					this.notify(
+						`Checklist timer: "${session.title}" is already being timed.`,
+						this.resultFileOptions(session),
+					);
 					return;
 				}
 				if (this.settings.autoSwitchSessions) {
 					this.notify(
 						`Checklist timer: starting a new checklist — stopping "${session.title}" first.`,
+						this.resultFileOptions(session),
 					);
 					await this.finishSession('stopped');
 				} else {
 					this.notify(
 						`Checklist timer: "${session.title}" is already being timed — this checklist won't be tracked. Turn on auto-switch in settings to switch automatically instead.`,
+						this.resultFileOptions(session),
 					);
 					return;
 				}
@@ -126,6 +136,7 @@ export class SessionManager {
 			if (session) {
 				this.notify(
 					`Checklist timer: not tracked — "${session.title}" is currently being timed.`,
+					this.resultFileOptions(session),
 				);
 			}
 			return;
@@ -138,7 +149,10 @@ export class SessionManager {
 		session.lastEventTime = this.now();
 		session.results.push({ text: item.text, durationMs: duration });
 
-		await this.appendItem(session, item.text, duration);
+		const wrote = await this.appendItem(session, item.text, duration);
+		if (wrote) {
+			this.notify(`⏱ ${item.text}: ${formatDuration(duration)}`, this.resultFileOptions(session));
+		}
 
 		if (index === block.items.length - 1) {
 			await this.finishSession('completed');
@@ -164,7 +178,7 @@ export class SessionManager {
 			outputFile: null,
 			results: [],
 		};
-		this.notify('Checklist timer: started.');
+		this.notify(`▶️ "${title}" started`);
 		this.onStatusChange(`Checklist timer: running (${title})`);
 	}
 
@@ -180,7 +194,11 @@ export class SessionManager {
 		return this.normalizePath(rawPath);
 	}
 
-	private async appendItem(session: ActiveSession, text: string, durationMs: number) {
+	private async appendItem(
+		session: ActiveSession,
+		text: string,
+		durationMs: number,
+	): Promise<boolean> {
 		const line = `- ${text}: ${formatDuration(durationMs)}\n`;
 		try {
 			if (!session.outputFile) {
@@ -198,10 +216,13 @@ export class SessionManager {
 			} else {
 				await this.vault.append(session.outputFile, line);
 			}
+			return true;
 		} catch (err) {
 			this.notify(
 				`Checklist timer: failed to write to ${session.outputPath} (${String(err)})`,
+				this.resultFileOptions(session),
 			);
+			return false;
 		}
 	}
 
@@ -211,7 +232,8 @@ export class SessionManager {
 		this.activeSession = null;
 		this.onStatusChange('');
 
-		if (!session.outputFile) {
+		const outputFile = session.outputFile;
+		if (!outputFile) {
 			this.notify('Checklist timer: stopped (no items timed).');
 			return;
 		}
@@ -226,12 +248,27 @@ export class SessionManager {
 			`\nTotal: ${formatDuration(totalMs)}${suffix}\n\n` +
 			`## Sorted by duration (slowest first)\n\n${slowestFirstLines}\n`;
 		try {
-			await this.vault.append(session.outputFile, footer);
-			this.notify(`Checklist timer: saved timing to ${session.outputPath}`);
+			await this.vault.append(outputFile, footer);
+			this.notify(
+				`✅ "${session.title}" finished in ${formatDuration(totalMs)}${suffix} — click to open results`,
+				{ filePath: outputFile.path, durationMs: FINISH_NOTICE_DURATION_MS },
+			);
 		} catch (err) {
 			this.notify(
 				`Checklist timer: failed to write total to ${session.outputPath} (${String(err)})`,
+				{ filePath: outputFile.path },
 			);
 		}
+	}
+
+	// Only worth attaching a click-to-open target once the output file
+	// actually exists — it's created lazily on the first timed item (see
+	// ActiveSession.outputFile), so early-session notices have nothing to
+	// point to yet.
+	private resultFileOptions(session: ActiveSession): NotifyOptions | undefined {
+		// .path (not the once-computed outputPath) so a click still resolves
+		// correctly even if the note was renamed/moved mid-session — Obsidian
+		// updates a TFile's .path in place rather than issuing a new object.
+		return session.outputFile ? { filePath: session.outputFile.path } : undefined;
 	}
 }
