@@ -53,6 +53,22 @@ export default class ChecklistTimerPlugin extends Plugin {
 				void this.sessionManager.handleFileContent(file, editor.getValue());
 			}),
 		);
+
+		// Catches check-offs that never pass through a live editor — e.g. the
+		// Checklist plugin's sidebar view, or Reading View, both of which write
+		// to the file directly via the Vault API. editor-change alone missed
+		// these, and previously only "worked" by accident when the note also
+		// happened to be open in an editor that received the synced change.
+		// SessionManager's block-state cache diffs against previous state, so
+		// a change already seen via editor-change is a harmless no-op here.
+		this.registerEvent(
+			this.app.vault.on('modify', (file) => {
+				if (!(file instanceof TFile) || file.extension !== 'md') return;
+				void this.app.vault.cachedRead(file).then((content) => {
+					void this.sessionManager.handleFileContent(file, content);
+				});
+			}),
+		);
 	}
 
 	onunload() {}
