@@ -1,6 +1,7 @@
 import { App, PluginSettingTab, Setting, SettingDefinitionItem } from 'obsidian';
 import ChecklistTimerPlugin from './main';
 import { ChecklistTimerSettings, DEFAULT_SETTINGS } from './settings-schema';
+import { TimeFormat } from './utils/format';
 
 export type { ChecklistTimerSettings };
 export { DEFAULT_SETTINGS };
@@ -72,6 +73,27 @@ export class ChecklistTimerSettingTab extends PluginSettingTab {
 					key: 'resetOnCompletion',
 				},
 			},
+			{
+				name: 'Show active task timer',
+				desc: 'Show the currently timed item and its elapsed time in the status bar.',
+				control: {
+					type: 'toggle',
+					key: 'showActiveTaskTimer',
+				},
+			},
+			{
+				name: 'Active task timer format',
+				desc: 'Time format for the status bar elapsed time.',
+				control: {
+					type: 'dropdown',
+					key: 'activeTaskTimerFormat',
+					options: {
+						'mm:ss': 'mm:ss',
+						'hh:mm': 'hh:mm',
+						'hh:mm:ss': 'hh:mm:ss',
+					},
+				},
+			},
 		];
 	}
 
@@ -101,6 +123,12 @@ export class ChecklistTimerSettingTab extends PluginSettingTab {
 				break;
 			case 'resetOnCompletion':
 				this.plugin.settings.resetOnCompletion = value as boolean;
+				break;
+			case 'showActiveTaskTimer':
+				this.plugin.settings.showActiveTaskTimer = value as boolean;
+				break;
+			case 'activeTaskTimerFormat':
+				this.plugin.settings.activeTaskTimerFormat = value as TimeFormat;
 				break;
 		}
 		return this.plugin.saveSettings();
@@ -193,6 +221,33 @@ export class ChecklistTimerSettingTab extends PluginSettingTab {
 					.setValue(this.plugin.settings.resetOnCompletion)
 					.onChange(async (value) => {
 						this.plugin.settings.resetOnCompletion = value;
+						await this.plugin.saveSettings();
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName('Show active task timer')
+			.setDesc('Show the currently timed item and its elapsed time in the status bar.')
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.showActiveTaskTimer)
+					.onChange(async (value) => {
+						this.plugin.settings.showActiveTaskTimer = value;
+						await this.plugin.saveSettings();
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName('Active task timer format')
+			.setDesc('Time format for the status bar elapsed time.')
+			.addDropdown((dropdown) =>
+				dropdown
+					.addOption('mm:ss', 'mm:ss')
+					.addOption('hh:mm', 'hh:mm')
+					.addOption('hh:mm:ss', 'hh:mm:ss')
+					.setValue(this.plugin.settings.activeTaskTimerFormat)
+					.onChange(async (value) => {
+						this.plugin.settings.activeTaskTimerFormat = value as TimeFormat;
 						await this.plugin.saveSettings();
 					}),
 			);

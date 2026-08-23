@@ -1,5 +1,11 @@
 import type { TFile } from 'obsidian';
-import { ChecklistBlock, findTimedBlocks, resolveStartIndex, uncheckBlock } from './utils/checklist';
+import {
+	ChecklistBlock,
+	ChecklistItem,
+	findTimedBlocks,
+	resolveStartIndex,
+	uncheckBlock,
+} from './utils/checklist';
 import { formatDuration, renderFilename } from './utils/format';
 import { ChecklistTimerSettings } from './settings-schema';
 import { EditorAccess, Notifier, NotifyOptions, VaultAccess } from './timer-port';
@@ -28,6 +34,24 @@ interface ActiveSession {
 	// before finish, this in-memory copy is lost, but the already-appended
 	// lines in the note are not — see CLAUDE.md.
 	results: TimedResult[];
+	// Snapshot of the block's items as of the last processed check-off (or
+	// session start), including their checked state — the source of truth
+	// getActiveTask() reads from to find whichever item is currently
+	// accumulating time. Kept as raw items rather than a cached "current item
+	// name" so an out-of-order check-off (e.g. a bulk edit, or another
+	// plugin's sidebar checking a later item first) is reflected correctly:
+	// the active item is derived from actual checked state, not an
+	// assumption that items are always checked in sequence.
+	items: ChecklistItem[];
+	startIndex: number;
+}
+
+// Public snapshot of the item currently being timed, for status bar display.
+export interface ActiveTask {
+	name: string;
+	// Timestamp (same clock as the `now` constructor arg) the current item
+	// started accumulating time — i.e. ActiveSession.lastEventTime.
+	startTime: number;
 }
 
 // Tracks at most one running session across the whole vault (see CLAUDE.md:
@@ -43,7 +67,11 @@ export class SessionManager {
 	constructor(
 		private readonly vault: VaultAccess,
 		private settings: ChecklistTimerSettings,
-		private readonly onStatusChange: (status: string) => void,
+		// Fired whenever a session starts or ends — a "something changed,
+		// refresh your display" signal rather than a message to show; the
+		// active task timer (main.ts) derives what to render from
+		// getActiveTask() instead.
+		private readonly onStatusChange: () => void,
 		private readonly notify: Notifier,
 		private readonly now: () => number = Date.now,
 		// Obsidian's normalizePath() — cleans user-typed folder paths (stray
@@ -60,6 +88,20 @@ export class SessionManager {
 
 	hasActiveSession(): boolean {
 		return this.activeSession !== null;
+	}
+
+	getActiveTask(): ActiveTask | null {
+		const session = this.activeSession;
+		if (!session) return null;
+		// First still-unchecked item after the start item — i.e. whichever
+		// item's check-off will next stop the clock. Returns null once none
+		// remain (the block is done but finishSession hasn't run yet), so the
+		// status bar hides instead of flashing a stale/misleading name.
+		const nextItem = session.items.find(
+			(item, index) => index > session.startIndex && !item.checked,
+		);
+		if (!nextItem) return null;
+		return { name: nextItem.text, startTime: session.lastEventTime };
 	}
 
 	async handleFileContent(file: TFile, content: string) {
@@ -131,7 +173,14 @@ export class SessionManager {
 					return;
 				}
 			}
-			this.startSession(file, block);
+			this.startSession(file, block, startIndex);
+			// The start item can also be the block's last item (e.g. a
+			// single-item checklist) — without this, the session would start
+			// but nothing would ever trigger its finish, since the "last item
+			// checked" check below only runs for indices *after* startIndex.
+			if (startIndex === block.items.length - 1) {
+				await this.finishSession('completed', file, block);
+			}
 			return;
 		}
 
@@ -151,6 +200,7 @@ export class SessionManager {
 		const duration = this.now() - session.lastEventTime;
 		session.lastEventTime = this.now();
 		session.results.push({ text: item.text, durationMs: duration });
+		session.items = block.items;
 
 		const wrote = await this.appendItem(session, item.text, duration);
 		if (wrote) {
@@ -170,7 +220,7 @@ export class SessionManager {
 		await this.finishSession('stopped');
 	}
 
-	private startSession(file: TFile, block: ChecklistBlock) {
+	private startSession(file: TFile, block: ChecklistBlock, startIndex: number) {
 		const title = file.basename;
 		this.activeSession = {
 			filePath: file.path,
@@ -180,9 +230,11 @@ export class SessionManager {
 			outputPath: this.resolveOutputPath(title),
 			outputFile: null,
 			results: [],
+			items: block.items,
+			startIndex,
 		};
 		this.notify(`▶️ "${title}" started`);
-		this.onStatusChange(`Checklist timer: running (${title})`);
+		this.onStatusChange();
 	}
 
 	private normalizedFolder(): string {
@@ -237,39 +289,40 @@ export class SessionManager {
 		const session = this.activeSession;
 		if (!session) return;
 		this.activeSession = null;
-		this.onStatusChange('');
+		this.onStatusChange();
 
 		const outputFile = session.outputFile;
 		if (!outputFile) {
 			this.notify('Checklist timer: stopped (no items timed).');
-			return;
-		}
-
-		const suffix = reason === 'stopped' ? ' (stopped early)' : '';
-		const totalMs = session.results.reduce((sum, result) => sum + result.durationMs, 0);
-		const slowestFirst = [...session.results].sort((a, b) => b.durationMs - a.durationMs);
-		const slowestFirstLines = slowestFirst
-			.map((result) => `- ${result.text}: ${formatDuration(result.durationMs)}`)
-			.join('\n');
-		const footer =
-			`\nTotal: ${formatDuration(totalMs)}${suffix}\n\n` +
-			`## Sorted by duration (slowest first)\n\n${slowestFirstLines}\n`;
-		try {
-			await this.writeNoteContent(outputFile, (current) => current + footer);
-			this.notify(
-				`✅ "${session.title}" finished in ${formatDuration(totalMs)}${suffix} — click to open results`,
-				{ filePath: outputFile.path, durationMs: FINISH_NOTICE_DURATION_MS },
-			);
-		} catch (err) {
-			this.notify(
-				`Checklist timer: failed to write total to ${session.outputPath} (${String(err)})`,
-				{ filePath: outputFile.path },
-			);
+		} else {
+			const suffix = reason === 'stopped' ? ' (stopped early)' : '';
+			const totalMs = session.results.reduce((sum, result) => sum + result.durationMs, 0);
+			const slowestFirst = [...session.results].sort((a, b) => b.durationMs - a.durationMs);
+			const slowestFirstLines = slowestFirst
+				.map((result) => `- ${result.text}: ${formatDuration(result.durationMs)}`)
+				.join('\n');
+			const footer =
+				`\nTotal: ${formatDuration(totalMs)}${suffix}\n\n` +
+				`## Sorted by duration (slowest first)\n\n${slowestFirstLines}\n`;
+			try {
+				await this.writeNoteContent(outputFile, (current) => current + footer);
+				this.notify(
+					`✅ "${session.title}" finished in ${formatDuration(totalMs)}${suffix} — click to open results`,
+					{ filePath: outputFile.path, durationMs: FINISH_NOTICE_DURATION_MS },
+				);
+			} catch (err) {
+				this.notify(
+					`Checklist timer: failed to write total to ${session.outputPath} (${String(err)})`,
+					{ filePath: outputFile.path },
+				);
+			}
 		}
 
 		// Only a natural finish (last item checked) resets the checklist — a
 		// manual stop means the run was intentionally left incomplete, so the
-		// checklist is left as-is rather than blanking out real progress.
+		// checklist is left as-is rather than blanking out real progress. Runs
+		// even when nothing was ever timed (e.g. the start item is also the
+		// block's last item), since that's still a completed run.
 		if (reason === 'completed' && this.settings.resetOnCompletion && sourceFile && sourceBlock) {
 			await this.resetChecklistBlock(sourceFile, sourceBlock);
 		}
