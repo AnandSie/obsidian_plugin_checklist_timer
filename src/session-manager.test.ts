@@ -286,6 +286,15 @@ describe('SessionManager — basic sequential timing', () => {
 			(noticeOptions[finishIndex]?.durationMs ?? 0) > 5000,
 			'the finish notice should stay visible longer than Obsidian’s default',
 		);
+		assert.equal(
+			noticeOptions[finishIndex]?.autoOpen,
+			true,
+			'only the finish notice should be eligible for auto-opening the output note',
+		);
+		assert.ok(
+			noticeOptions.filter((options) => options?.autoOpen).length === 1,
+			'per-item notices must not set autoOpen even though they also carry filePath',
+		);
 	});
 
 	it('does not fire a misleading per-item notice when the write actually fails', async () => {

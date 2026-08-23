@@ -341,6 +341,7 @@ export class SessionManager {
 						filePath: outputFile.path,
 						durationMs: FINISH_NOTICE_DURATION_MS,
 						openInReadingView: this.settings.showReadingViewBarChart,
+						autoOpen: true,
 					},
 				);
 			} catch (err) {

@@ -53,18 +53,14 @@ export default class ChecklistTimerPlugin extends Plugin {
 				// down to this plugin's minAppVersion.
 				notice.noticeEl.addClass('checklist-timer-clickable-notice');
 				notice.noticeEl.addEventListener('click', () => {
-					const file = this.app.vault.getAbstractFileByPath(filePath);
-					if (file instanceof TFile) {
-						// Only the finish notice sets openInReadingView (see its doc
-						// comment in timer-port.ts) — other clickable notices during a
-						// still-running session (e.g. per-item "⏱ ..." notices) leave
-						// this unset, so clicking them respects the leaf's normal
-						// default mode instead of yanking an in-progress note into
-						// Reading view.
-						const openState = options?.openInReadingView ? { state: { mode: 'preview' } } : undefined;
-						void this.app.workspace.getLeaf(false).openFile(file, openState);
-					}
+					this.openOutputFile(filePath, options?.openInReadingView);
 				});
+				// autoOpen is only set on the session-finish notice (see the
+				// NotifyOptions doc comment in timer-port.ts) — per-item notices
+				// carry filePath too, but only for click-to-open, not this.
+				if (options?.autoOpen && this.settings.autoOpenOutputNote) {
+					this.openOutputFile(filePath, options?.openInReadingView);
+				}
 			},
 			Date.now,
 			normalizePath,
@@ -164,6 +160,17 @@ export default class ChecklistTimerPlugin extends Plugin {
 			const fill = track.createDiv({ cls: 'checklist-timer-bar-fill' });
 			fill.style.width = `${Math.round((fractions[index] ?? 0) * 100)}%`;
 		});
+	}
+
+	// Shared by the finish notice's click handler and its autoOpenOutputNote
+	// auto-open — openInReadingView is only ever set on the finish notice
+	// (see NotifyOptions), so both paths land in the same place either way.
+	private openOutputFile(filePath: string, openInReadingView?: boolean) {
+		const file = this.app.vault.getAbstractFileByPath(filePath);
+		if (file instanceof TFile) {
+			const openState = openInReadingView ? { state: { mode: 'preview' } } : undefined;
+			void this.app.workspace.getLeaf(false).openFile(file, openState);
+		}
 	}
 
 	// Wraps the real Vault so SessionManager gets a proper TFile-or-null from

@@ -110,6 +110,14 @@ export class ChecklistTimerSettingTab extends PluginSettingTab {
 					key: 'showReadingViewBarChart',
 				},
 			},
+			{
+				name: 'Auto-open output note',
+				desc: 'When a timed checklist finishes (completed or stopped early), automatically open the output note instead of only linking to it from the finish notice.',
+				control: {
+					type: 'toggle',
+					key: 'autoOpenOutputNote',
+				},
+			},
 		];
 	}
 
@@ -151,6 +159,9 @@ export class ChecklistTimerSettingTab extends PluginSettingTab {
 				break;
 			case 'showReadingViewBarChart':
 				this.plugin.settings.showReadingViewBarChart = value as boolean;
+				break;
+			case 'autoOpenOutputNote':
+				this.plugin.settings.autoOpenOutputNote = value as boolean;
 				break;
 		}
 		return this.plugin.saveSettings();
@@ -298,6 +309,20 @@ export class ChecklistTimerSettingTab extends PluginSettingTab {
 					.setValue(this.plugin.settings.showReadingViewBarChart)
 					.onChange(async (value) => {
 						this.plugin.settings.showReadingViewBarChart = value;
+						await this.plugin.saveSettings();
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName('Auto-open output note')
+			.setDesc(
+				'When a timed checklist finishes (completed or stopped early), automatically open the output note instead of only linking to it from the finish notice.',
+			)
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.autoOpenOutputNote)
+					.onChange(async (value) => {
+						this.plugin.settings.autoOpenOutputNote = value;
 						await this.plugin.saveSettings();
 					}),
 			);

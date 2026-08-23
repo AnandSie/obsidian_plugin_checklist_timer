@@ -56,6 +56,12 @@ export interface NotifyOptions {
 	// yank a still-in-progress session's note out from under the user while
 	// they're mid-edit.
 	openInReadingView?: boolean;
+	// True only for the session-finish notice — signals that `filePath` is
+	// eligible for the autoOpenOutputNote setting to open it immediately,
+	// not just on click. Per-item notices also carry filePath (so they stay
+	// clickable) but never set this, since opening the note on every single
+	// check-off would be disruptive rather than helpful.
+	autoOpen?: boolean;
 }
 
 export type Notifier = (message: string, options?: NotifyOptions) => void;
