@@ -1,3 +1,5 @@
+import { TimeFormat } from './utils/format';
+
 // Plain data shape for settings, kept free of any Obsidian runtime import so
 // it (and anything that only needs it, like SessionManager) can be unit
 // tested without a real Obsidian environment. The UI (ChecklistTimerSettingTab
@@ -25,6 +27,10 @@ export interface ChecklistTimerSettings {
 	// without manual cleanup. Does not apply to a manual stop — an
 	// intentionally incomplete run leaves the checklist as-is.
 	resetOnCompletion: boolean;
+	// Show the currently timed item and its elapsed time in the status bar.
+	showActiveTaskTimer: boolean;
+	// Time format for the status bar elapsed time (see utils/format.ts).
+	activeTaskTimerFormat: TimeFormat;
 }
 
 export const DEFAULT_SETTINGS: ChecklistTimerSettings = {
@@ -34,4 +40,6 @@ export const DEFAULT_SETTINGS: ChecklistTimerSettings = {
 	outputFolder: '',
 	filenameTemplate: '{{date}} {{title}} timing',
 	resetOnCompletion: true,
+	showActiveTaskTimer: false,
+	activeTaskTimerFormat: 'mm:ss',
 };

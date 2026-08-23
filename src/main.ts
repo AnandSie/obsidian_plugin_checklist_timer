@@ -13,21 +13,38 @@ import {
 } from './settings';
 import { SessionManager } from './session-manager';
 import { EditorAccess, OpenEditor } from './timer-port';
+import { formatElapsed, truncateTaskName } from './utils/format';
+
+// Status bar tick cadence. formatElapsed only changes visibly every minute
+// for the 'hh:mm' format, but ticking every second regardless is simpler
+// than reconfiguring the interval whenever the format setting changes, and
+// costs nothing noticeable.
+const ACTIVE_TASK_TICK_MS = 1_000;
 
 export default class ChecklistTimerPlugin extends Plugin {
 	settings!: ChecklistTimerSettings;
 	sessionManager!: SessionManager;
 	private statusBarItemEl!: HTMLElement;
+	private activeTaskStatusBarEl!: HTMLElement;
 
 	async onload() {
 		await this.loadSettings();
 
 		this.statusBarItemEl = this.addStatusBarItem();
 
+		// Display-only (never registers a click handler) — the active task
+		// timer, shown only while enabled in settings and a session is running.
+		this.activeTaskStatusBarEl = this.addStatusBarItem();
+		this.activeTaskStatusBarEl.addClass('checklist-timer-active-task');
+		this.activeTaskStatusBarEl.hide();
+
 		this.sessionManager = new SessionManager(
 			this.app.vault,
 			this.settings,
-			(status) => this.statusBarItemEl.setText(status),
+			(status) => {
+				this.statusBarItemEl.setText(status);
+				this.updateActiveTaskStatusBar();
+			},
 			(message, options) => {
 				const notice = new Notice(message, options?.durationMs);
 				const filePath = options?.filePath;
@@ -60,6 +77,10 @@ export default class ChecklistTimerPlugin extends Plugin {
 		});
 
 		this.addSettingTab(new ChecklistTimerSettingTab(this.app, this));
+
+		this.registerInterval(
+			window.setInterval(() => this.updateActiveTaskStatusBar(), ACTIVE_TASK_TICK_MS),
+		);
 
 		this.registerEvent(
 			this.app.workspace.on('editor-change', (editor, info) => {
@@ -111,6 +132,24 @@ export default class ChecklistTimerPlugin extends Plugin {
 		};
 	}
 
+	// Hidden whenever the setting is off or nothing is running (acceptance
+	// criteria: no task running, or the feature disabled, means no status bar
+	// item at all — not just an empty one).
+	private updateActiveTaskStatusBar() {
+		if (!this.settings.showActiveTaskTimer) {
+			this.activeTaskStatusBarEl.hide();
+			return;
+		}
+		const task = this.sessionManager.getActiveTask();
+		if (!task) {
+			this.activeTaskStatusBarEl.hide();
+			return;
+		}
+		const elapsed = formatElapsed(Date.now() - task.startTime, this.settings.activeTaskTimerFormat);
+		this.activeTaskStatusBarEl.setText(`${truncateTaskName(task.name)} ${elapsed}`);
+		this.activeTaskStatusBarEl.show();
+	}
+
 	async loadSettings() {
 		this.settings = Object.assign(
 			{},
@@ -122,5 +161,6 @@ export default class ChecklistTimerPlugin extends Plugin {
 	async saveSettings() {
 		await this.saveData(this.settings);
 		this.sessionManager.updateSettings(this.settings);
+		this.updateActiveTaskStatusBar();
 	}
 }

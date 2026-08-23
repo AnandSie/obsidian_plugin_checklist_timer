@@ -28,6 +28,19 @@ interface ActiveSession {
 	// before finish, this in-memory copy is lost, but the already-appended
 	// lines in the note are not — see CLAUDE.md.
 	results: TimedResult[];
+	// Text of whichever item is currently accumulating time — i.e. the next
+	// unchecked item after the last check-off (or after the start item, if
+	// nothing else has been checked yet). Drives the status bar's "active
+	// task timer" display.
+	currentItemText: string;
+}
+
+// Public snapshot of the item currently being timed, for status bar display.
+export interface ActiveTask {
+	name: string;
+	// Timestamp (same clock as the `now` constructor arg) the current item
+	// started accumulating time — i.e. ActiveSession.lastEventTime.
+	startTime: number;
 }
 
 // Tracks at most one running session across the whole vault (see CLAUDE.md:
@@ -60,6 +73,14 @@ export class SessionManager {
 
 	hasActiveSession(): boolean {
 		return this.activeSession !== null;
+	}
+
+	getActiveTask(): ActiveTask | null {
+		if (!this.activeSession) return null;
+		return {
+			name: this.activeSession.currentItemText,
+			startTime: this.activeSession.lastEventTime,
+		};
 	}
 
 	async handleFileContent(file: TFile, content: string) {
@@ -131,7 +152,7 @@ export class SessionManager {
 					return;
 				}
 			}
-			this.startSession(file, block);
+			this.startSession(file, block, startIndex);
 			return;
 		}
 
@@ -151,6 +172,7 @@ export class SessionManager {
 		const duration = this.now() - session.lastEventTime;
 		session.lastEventTime = this.now();
 		session.results.push({ text: item.text, durationMs: duration });
+		session.currentItemText = block.items[index + 1]?.text ?? session.title;
 
 		const wrote = await this.appendItem(session, item.text, duration);
 		if (wrote) {
@@ -170,7 +192,7 @@ export class SessionManager {
 		await this.finishSession('stopped');
 	}
 
-	private startSession(file: TFile, block: ChecklistBlock) {
+	private startSession(file: TFile, block: ChecklistBlock, startIndex: number) {
 		const title = file.basename;
 		this.activeSession = {
 			filePath: file.path,
@@ -180,6 +202,11 @@ export class SessionManager {
 			outputPath: this.resolveOutputPath(title),
 			outputFile: null,
 			results: [],
+			// The item after the start item is the one that begins accumulating
+			// time now (see CLAUDE.md: checking the start item starts the clock
+			// for the item that follows it). Falls back to the title in the
+			// edge case where the start item is also the block's last item.
+			currentItemText: block.items[startIndex + 1]?.text ?? title,
 		};
 		this.notify(`▶️ "${title}" started`);
 		this.onStatusChange(`Checklist timer: running (${title})`);

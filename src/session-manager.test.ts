@@ -304,6 +304,67 @@ describe('SessionManager — basic sequential timing', () => {
 	});
 });
 
+describe('SessionManager — getActiveTask', () => {
+	let vault: FakeVault;
+	let clock: FakeClock;
+
+	beforeEach(() => {
+		vault = new FakeVault();
+		clock = new FakeClock();
+	});
+
+	it('is null when nothing is running', async () => {
+		const { manager } = makeManager(vault, clock);
+		assert.equal(manager.getActiveTask(), null);
+	});
+
+	it('reports the item after start as the active task once the clock starts', async () => {
+		const { manager } = makeManager(vault, clock);
+		const file = sourceFile('Week Plan.md');
+
+		await manager.handleFileContent(file, '#timed\n- [ ] Start\n- [ ] Two\n- [ ] Three\n');
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [ ] Two\n- [ ] Three\n');
+
+		assert.deepEqual(manager.getActiveTask(), { name: 'Two', startTime: 0 });
+	});
+
+	it('advances to the next item, with a fresh start time, on each check-off', async () => {
+		const { manager } = makeManager(vault, clock);
+		const file = sourceFile('Week Plan.md');
+
+		await manager.handleFileContent(file, '#timed\n- [ ] Start\n- [ ] Two\n- [ ] Three\n');
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [ ] Two\n- [ ] Three\n');
+
+		clock.advance(5_000);
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n- [ ] Three\n');
+
+		assert.deepEqual(manager.getActiveTask(), { name: 'Three', startTime: 5_000 });
+	});
+
+	it('is null again once the session finishes', async () => {
+		const { manager } = makeManager(vault, clock);
+		const file = sourceFile('Week Plan.md');
+
+		await manager.handleFileContent(file, '#timed\n- [ ] Start\n- [ ] Two\n');
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [ ] Two\n');
+		clock.advance(1_000);
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n');
+
+		assert.equal(manager.getActiveTask(), null);
+	});
+
+	it('is null again after a manual stop', async () => {
+		const { manager } = makeManager(vault, clock);
+		const file = sourceFile('Week Plan.md');
+
+		await manager.handleFileContent(file, '#timed\n- [ ] Start\n- [ ] Two\n');
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [ ] Two\n');
+		await manager.stopActiveSession();
+
+		assert.equal(manager.getActiveTask(), null);
+	});
+});
+
 describe('SessionManager — two checklists started while one is running', () => {
 	let vault: FakeVault;
 	let clock: FakeClock;
