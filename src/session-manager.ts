@@ -262,7 +262,7 @@ export class SessionManager {
 		text: string,
 		durationMs: number,
 	): Promise<boolean> {
-		const line = `- ${formatDuration(durationMs)}: ${text}\n`;
+		const line = `- ${formatDuration(durationMs)} - ${text}\n`;
 		try {
 			if (!session.outputFile) {
 				const folder = this.normalizedFolder();
@@ -321,7 +321,7 @@ export class SessionManager {
 			const totalMs = session.results.reduce((sum, result) => sum + result.durationMs, 0);
 			const slowestFirst = [...session.results].sort((a, b) => b.durationMs - a.durationMs);
 			const slowestFirstLines = slowestFirst
-				.map((result) => `- ${formatDuration(result.durationMs)}: ${result.text}`)
+				.map((result) => `- ${formatDuration(result.durationMs)} - ${result.text}`)
 				.join('\n');
 			const footer =
 				`\n**Total:** ${formatDuration(totalMs)}${suffix}\n\n` +

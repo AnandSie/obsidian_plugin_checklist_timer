@@ -105,7 +105,7 @@ rather than batching everything until the end:
 - Output location: configurable folder path, defaulting to vault root.
 - Filename: configurable via a template (further templating, e.g. reusing the
   user's existing Templater templates, is a future idea — not v1).
-- Content format (v1): a simple bulleted list of `duration: item name`,
+- Content format (v1): a simple bulleted list of `duration - item name`,
   duration formatted as `HH:MM:SS`.
 - Duration granularity (minutes-only, or including milliseconds) should be
   configurable eventually, but `HH:MM:SS` is the v1 default.
