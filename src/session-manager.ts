@@ -7,6 +7,7 @@ import {
 	uncheckBlock,
 } from './utils/checklist';
 import { formatDuration, renderFilename } from './utils/format';
+import { OUTPUT_NOTE_MARKER } from './utils/duration-bars';
 import { ChecklistTimerSettings } from './settings-schema';
 import { EditorAccess, Notifier, NotifyOptions, VaultAccess } from './timer-port';
 
@@ -280,7 +281,7 @@ export class SessionManager {
 				const barChartHint = this.settings.showReadingViewBarChart
 					? '> [!tip] Switch to Reading view (📖 the book icon) to see each item as a bar chart.\n\n'
 					: '';
-				const header = `# ${session.title} timing\n\nSource: [[${this.sourceLinkTarget(session)}]]\n\n${barChartHint}## In order\n\n`;
+				const header = `# ${session.title} timing\n\nSource: [[${this.sourceLinkTarget(session)}]]\n\n${barChartHint}${OUTPUT_NOTE_MARKER}\n\n`;
 				const existing = this.settings.overwriteExistingFile
 					? this.vault.getExistingFile(session.outputPath)
 					: null;
@@ -336,7 +337,11 @@ export class SessionManager {
 				await this.writeNoteContent(outputFile, (current) => current + footer);
 				this.notify(
 					`✅ "${session.title}" finished in ${formatDuration(totalMs)}${suffix} — click to open results`,
-					{ filePath: outputFile.path, durationMs: FINISH_NOTICE_DURATION_MS },
+					{
+						filePath: outputFile.path,
+						durationMs: FINISH_NOTICE_DURATION_MS,
+						openInReadingView: this.settings.showReadingViewBarChart,
+					},
 				);
 			} catch (err) {
 				this.notify(

@@ -46,6 +46,16 @@ export interface NotifyOptions {
 	filePath?: string;
 	// Overrides Obsidian's default auto-dismiss timeout (ms) for this notice.
 	durationMs?: number;
+	// Only set on the finish notice (and only when showReadingViewBarChart is
+	// on) — tells the click handler to open filePath straight into Reading
+	// view instead of whatever mode the leaf would otherwise default to.
+	// Deliberately per-notice rather than a blanket check against the
+	// setting at click time: several other notices during a session also
+	// carry a filePath (e.g. the per-item "⏱ ..." notice, via
+	// resultFileOptions), and forcing those into Reading view too would
+	// yank a still-in-progress session's note out from under the user while
+	// they're mid-edit.
+	openInReadingView?: boolean;
 }
 
 export type Notifier = (message: string, options?: NotifyOptions) => void;
