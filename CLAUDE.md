@@ -177,31 +177,39 @@ identifying checklists) over inventing a new mechanism.
 
 ## Known issues / possible bugs (unconfirmed)
 
-- **Output note may lose lines if it's open in an editor while the plugin is
-  still appending to it.** `SessionManager.appendItem`/`finishSession` write
-  via `vault.append()` (a direct disk write) on every check-off. If the
-  output note is *also* open in a pane during an active session, Obsidian's
-  editor holds its own in-memory copy of that note; if the editor's copy
-  gets saved back to disk after the plugin has appended new lines, it can
-  overwrite (silently discard) those lines, since the editor's buffer is
-  stale relative to the plugin's direct writes. Mirrors a related bug that
-  *was* confirmed and fixed (see release history / git log around
-  2026-08-22): checking off items via the Checklist plugin's sidebar (or
-  Reading View) writes to the *checklist* note directly too, bypassing any
-  open editor there — that one turned out to be real and was fixed by also
-  listening to `vault.on('modify')` instead of relying solely on
-  `editor-change`. This output-note variant is the mirror case (plugin
-  writing to a file that's open elsewhere) and has not been reproduced, only
-  reasoned through — no fix applied yet.
-  - Likely fix if confirmed: before appending, check whether the output note
-    is open in any pane (`workspace.iterateAllLeaves`); if so, write through
-    that `Editor` (e.g. `editor.replaceRange` at end-of-document) instead of
-    `vault.append()`, so there's only one owner of the file's content at a
-    time. Can't be covered by the existing `node:test` suite the way
-    `SessionManager` is (needs a real Obsidian `Editor`/`MarkdownView`,
-    unavailable outside the app — see `timer-port.ts`), so verifying it means
-    testing by hand in the dev vault: open the output note mid-session, keep
-    checking off items, confirm nothing goes missing.
+*(none currently — see "Fixed" below for the entry this section used to hold)*
+
+## Fixed
+
+- **A note the plugin writes to could lose data if it's also open in an
+  editor.** Originally flagged for the output note: `appendItem`/
+  `finishSession` wrote via `vault.append()`/`vault.modify()` (a direct disk
+  write) on every check-off, and if that note was *also* open in a pane,
+  Obsidian's editor held its own in-memory copy that could later save back to
+  disk and silently clobber the plugin's direct writes (editor buffer stale
+  relative to the out-of-band write). The `resetOnCompletion` feature (see
+  Interaction model above) added a second, higher-probability instance of the
+  same bug class on the *source* checklist note, which is essentially
+  guaranteed to be open in an editor at reset time. Mirrors a related bug
+  that *was* confirmed and fixed earlier (see git log around 2026-08-22):
+  checking off items via the Checklist plugin's sidebar/Reading View writes
+  to the checklist note directly too, bypassing any open editor — fixed then
+  by also listening to `vault.on('modify')` instead of relying solely on
+  `editor-change`.
+  - **Fix**: both write paths now go through a single `SessionManager
+    .writeNoteContent()` helper (session-manager.ts) that checks — via a new
+    `EditorAccess` port (timer-port.ts) implemented in main.ts with
+    `workspace.iterateAllLeaves()` — whether the target note is open in any
+    pane. If so, it mutates that live `Editor`'s buffer directly
+    (`getValue()`/`setValue()`) instead of touching disk; only when no editor
+    is open does it fall back to `vault.read()` + `vault.modify()`. Unlike
+    the earlier assumption, this *is* coverable by the `node:test` suite —
+    `EditorAccess`/`OpenEditor` are narrow enough to fake (see
+    `FakeEditorAccess`/`FakeEditor` in session-manager.test.ts) without a
+    real Obsidian `Editor`/`MarkdownView`. Still worth a manual pass in the
+    dev vault (open the output note and/or a recurring checklist mid-session,
+    keep checking off items) since the real `workspace.iterateAllLeaves()`
+    wiring in main.ts itself isn't exercised by that test suite.
 
 ## Backlog (explicitly not v1)
 

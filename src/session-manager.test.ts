@@ -3,22 +3,27 @@ import assert from 'node:assert/strict';
 import type { TFile } from 'obsidian';
 import { SessionManager } from './session-manager';
 import { DEFAULT_SETTINGS, ChecklistTimerSettings } from './settings-schema';
-import type { NotifyOptions, VaultAccess } from './timer-port';
+import type { EditorAccess, NotifyOptions, OpenEditor, VaultAccess } from './timer-port';
 
 // In-memory stand-in for Obsidian's Vault — real TFile objects are opaque to
 // SessionManager (it never inspects them beyond passing them back into
-// append()), so a plain object with a `path` is a faithful enough double.
+// read()/modify()), so a plain object with a `path` is a faithful enough
+// double.
 class FakeVault implements VaultAccess {
+	// Output notes created via create() — the only files SessionManager ever
+	// creates itself, so this also doubles as "does an output note exist yet".
 	files = new Map<string, string>();
 	folders = new Set<string>();
-	// Separate from `files` (which models the created/appended output note) —
-	// tracks writes back to a *source* checklist note, e.g. the reset feature
-	// unchecking its items. Keyed by path.
-	modified = new Map<string, string>();
-	// Test hook: makes the next append() call reject, to exercise write-failure paths.
-	failNextAppend = false;
-	// Test hook: makes the next modify() call reject, to exercise reset-failure paths.
+	// Any other on-disk content a test seeds — models a source checklist note
+	// that was never create()'d by SessionManager but can still be read()/
+	// modify()'d (e.g. by the reset-on-completion feature).
+	disk = new Map<string, string>();
+	// Test hook: makes the next modify() call reject, to exercise write-failure paths.
 	failNextModify = false;
+	// Test hook: makes the next modify() call for this specific path reject —
+	// lets a test target one write (e.g. the reset) when another modify()
+	// call (e.g. the finish footer) legitimately happens first in the same tick.
+	failModifyForPath: string | null = null;
 
 	getAbstractFileByPath(path: string): unknown {
 		if (this.files.has(path) || this.folders.has(path)) return { path };
@@ -36,30 +41,60 @@ class FakeVault implements VaultAccess {
 		return { path } as unknown as TFile;
 	}
 
-	async append(file: TFile, content: string): Promise<void> {
-		if (this.failNextAppend) {
-			this.failNextAppend = false;
-			throw new Error('simulated disk error');
-		}
+	async read(file: TFile): Promise<string> {
 		const path = (file as unknown as { path: string }).path;
-		const existing = this.files.get(path);
-		if (existing === undefined) throw new Error(`append to missing file: ${path}`);
-		this.files.set(path, existing + content);
+		if (this.files.has(path)) return this.files.get(path) as string;
+		if (this.disk.has(path)) return this.disk.get(path) as string;
+		throw new Error(`read missing file: ${path}`);
 	}
 
 	async modify(file: TFile, content: string): Promise<void> {
-		if (this.failNextModify) {
+		const path = (file as unknown as { path: string }).path;
+		if (this.failNextModify || this.failModifyForPath === path) {
 			this.failNextModify = false;
+			this.failModifyForPath = null;
 			throw new Error('simulated disk error');
 		}
-		const path = (file as unknown as { path: string }).path;
-		this.modified.set(path, content);
+		if (this.files.has(path)) {
+			this.files.set(path, content);
+		} else {
+			this.disk.set(path, content);
+		}
 	}
 
 	// Test helper: find the single stored file whose path contains `needle`.
 	findContent(needle: string): string | undefined {
 		const path = [...this.files.keys()].find((p) => p.includes(needle));
 		return path ? this.files.get(path) : undefined;
+	}
+}
+
+// Stand-in for Obsidian's Editor — just enough surface (getValue/setValue)
+// for writeNoteContent to treat it as the source of truth when a note is
+// open in a pane, instead of falling back to FakeVault's read/modify.
+class FakeEditor implements OpenEditor {
+	constructor(private content: string) {}
+	getValue(): string {
+		return this.content;
+	}
+	setValue(value: string): void {
+		this.content = value;
+	}
+}
+
+class FakeEditorAccess implements EditorAccess {
+	private editors = new Map<string, FakeEditor>();
+
+	// Simulates the note at `path` being open in a pane with `content` as the
+	// editor's current (possibly unsaved) buffer.
+	open(path: string, content: string): FakeEditor {
+		const editor = new FakeEditor(content);
+		this.editors.set(path, editor);
+		return editor;
+	}
+
+	getOpenEditor(path: string): OpenEditor | null {
+		return this.editors.get(path) ?? null;
 	}
 }
 
@@ -83,6 +118,7 @@ function makeManager(
 	clock: FakeClock,
 	overrides: Partial<ChecklistTimerSettings> = {},
 	normalizePath: (path: string) => string = (path) => path,
+	editorAccess?: EditorAccess,
 ) {
 	const notices: string[] = [];
 	const noticeOptions: (NotifyOptions | undefined)[] = [];
@@ -98,6 +134,7 @@ function makeManager(
 		},
 		clock.now,
 		normalizePath,
+		editorAccess,
 	);
 	return { manager, notices, noticeOptions, statuses };
 }
@@ -245,8 +282,8 @@ describe('SessionManager — basic sequential timing', () => {
 		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n- [ ] Three\n');
 		assert.ok(notices.some((n) => n.includes('⏱ Two:')));
 
-		// ...but the append for the second item fails.
-		vault.failNextAppend = true;
+		// ...but the write for the second item fails.
+		vault.failNextModify = true;
 		clock.advance(1_000);
 		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n- [x] Three\n');
 
@@ -407,26 +444,81 @@ describe('SessionManager — reset checklist on completion', () => {
 		clock = new FakeClock();
 	});
 
+	// Mirrors production: main.ts always hands SessionManager the same content
+	// it just read (from the editor or a fresh vault.cachedRead), so keeping
+	// FakeVault's "disk" in sync with each call is what makes the no-open-
+	// editor fallback path (vault.read then vault.modify) exercisable here.
+	async function tick(manager: SessionManager, file: TFile, content: string) {
+		vault.disk.set(file.path, content);
+		await manager.handleFileContent(file, content);
+	}
+
 	it('unchecks every item (including pre-start ones) once the session finishes naturally', async () => {
 		const { manager } = makeManager(vault, clock);
 		const file = sourceFile('Week Plan.md');
 
-		const content = '#timed\n- [x] Prep\n- [ ] #start Kickoff\n- [ ] Two\n';
-		await manager.handleFileContent(file, content);
-		await manager.handleFileContent(
-			file,
-			'#timed\n- [x] Prep\n- [x] #start Kickoff\n- [ ] Two\n',
-		);
+		await tick(manager, file, '#timed\n- [x] Prep\n- [ ] #start Kickoff\n- [ ] Two\n');
+		await tick(manager, file, '#timed\n- [x] Prep\n- [x] #start Kickoff\n- [ ] Two\n');
 		clock.advance(1_000);
-		await manager.handleFileContent(
-			file,
-			'#timed\n- [x] Prep\n- [x] #start Kickoff\n- [x] Two\n',
-		);
+		await tick(manager, file, '#timed\n- [x] Prep\n- [x] #start Kickoff\n- [x] Two\n');
 
 		assert.equal(
-			vault.modified.get('Week Plan.md'),
+			vault.disk.get('Week Plan.md'),
 			'#timed\n- [ ] Prep\n- [ ] #start Kickoff\n- [ ] Two\n',
 			'the source note should have every box in the block unchecked, pre-start items included',
+		);
+	});
+
+	it('writes through the open editor instead of vault.modify when the source note is open', async () => {
+		const editorAccess = new FakeEditorAccess();
+		const { manager } = makeManager(vault, clock, {}, undefined, editorAccess);
+		const file = sourceFile('Week Plan.md');
+		const editor = editorAccess.open(file.path, '#timed\n- [ ] Start\n- [ ] Two\n');
+
+		await manager.handleFileContent(file, editor.getValue());
+		editor.setValue('#timed\n- [x] Start\n- [ ] Two\n');
+		await manager.handleFileContent(file, editor.getValue());
+		clock.advance(1_000);
+		editor.setValue('#timed\n- [x] Start\n- [x] Two\n');
+		await manager.handleFileContent(file, editor.getValue());
+
+		assert.equal(
+			editor.getValue(),
+			'#timed\n- [ ] Start\n- [ ] Two\n',
+			'the live editor buffer should be reset directly',
+		);
+		assert.equal(vault.disk.size, 0, 'no raw vault write should happen while an editor is open');
+	});
+
+	it('also appends to the output note through its open editor, not vault.modify', async () => {
+		const editorAccess = new FakeEditorAccess();
+		const { manager } = makeManager(vault, clock, {}, undefined, editorAccess);
+		const file = sourceFile('Week Plan.md');
+
+		await tick(manager, file, '#timed\n- [ ] Start\n- [ ] Two\n- [ ] Three\n');
+		await tick(manager, file, '#timed\n- [x] Start\n- [ ] Two\n- [ ] Three\n');
+		clock.advance(1_000);
+		await tick(manager, file, '#timed\n- [x] Start\n- [x] Two\n- [ ] Three\n');
+
+		// The output note now exists (created via vault.create) — simulate the
+		// user opening it mid-session, before the second item is checked off.
+		const outputPath = [...vault.files.keys()][0];
+		assert.ok(outputPath);
+		const contentAtOpenTime = vault.files.get(outputPath) as string;
+		const outputEditor = editorAccess.open(outputPath, contentAtOpenTime);
+
+		clock.advance(1_000);
+		await tick(manager, file, '#timed\n- [x] Start\n- [x] Two\n- [x] Three\n');
+
+		assert.ok(
+			outputEditor.getValue().includes('Three: 00:00:01') &&
+				outputEditor.getValue().includes('Total: 00:00:02'),
+			'the per-item line and the finish footer should both land in the open editor',
+		);
+		assert.equal(
+			vault.files.get(outputPath),
+			contentAtOpenTime,
+			'vault.modify must not have overwritten the note out from under the open editor',
 		);
 	});
 
@@ -434,37 +526,49 @@ describe('SessionManager — reset checklist on completion', () => {
 		const { manager } = makeManager(vault, clock);
 		const file = sourceFile('Week Plan.md');
 
-		await manager.handleFileContent(file, '#timed\n- [ ] Start\n- [ ] Two\n- [ ] Three\n');
-		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [ ] Two\n- [ ] Three\n');
+		await tick(manager, file, '#timed\n- [ ] Start\n- [ ] Two\n- [ ] Three\n');
+		await tick(manager, file, '#timed\n- [x] Start\n- [ ] Two\n- [ ] Three\n');
 		clock.advance(1_000);
-		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n- [ ] Three\n');
+		await tick(manager, file, '#timed\n- [x] Start\n- [x] Two\n- [ ] Three\n');
+		const beforeStop = vault.disk.get('Week Plan.md');
 
 		await manager.stopActiveSession();
 
-		assert.equal(vault.modified.size, 0, 'stopping early must leave the checklist untouched');
+		assert.equal(
+			vault.disk.get('Week Plan.md'),
+			beforeStop,
+			'stopping early must leave the checklist untouched',
+		);
 	});
 
 	it('leaves the checklist alone when the setting is off', async () => {
 		const { manager } = makeManager(vault, clock, { resetOnCompletion: false });
 		const file = sourceFile('Week Plan.md');
 
-		await manager.handleFileContent(file, '#timed\n- [ ] Start\n- [ ] Two\n');
-		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [ ] Two\n');
+		await tick(manager, file, '#timed\n- [ ] Start\n- [ ] Two\n');
+		await tick(manager, file, '#timed\n- [x] Start\n- [ ] Two\n');
 		clock.advance(1_000);
-		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n');
+		await tick(manager, file, '#timed\n- [x] Start\n- [x] Two\n');
 
-		assert.equal(vault.modified.size, 0);
+		assert.equal(
+			vault.disk.get('Week Plan.md'),
+			'#timed\n- [x] Start\n- [x] Two\n',
+			'the checklist must be left exactly as the last check-off left it',
+		);
 	});
 
 	it('reports a failure to reset without throwing', async () => {
 		const { manager, notices } = makeManager(vault, clock);
 		const file = sourceFile('Week Plan.md');
 
-		await manager.handleFileContent(file, '#timed\n- [ ] Start\n- [ ] Two\n');
-		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [ ] Two\n');
+		await tick(manager, file, '#timed\n- [ ] Start\n- [ ] Two\n');
+		await tick(manager, file, '#timed\n- [x] Start\n- [ ] Two\n');
 		clock.advance(1_000);
-		vault.failNextModify = true;
-		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n');
+		// Target the reset write specifically — the finish footer write (a
+		// separate vault.modify call, on the output note) must be allowed to
+		// succeed first.
+		vault.failModifyForPath = file.path;
+		await tick(manager, file, '#timed\n- [x] Start\n- [x] Two\n');
 
 		assert.ok(notices.some((n) => n.includes('failed to reset checklist in Week Plan.md')));
 	});
