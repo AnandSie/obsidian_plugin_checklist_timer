@@ -25,26 +25,20 @@ export default class ChecklistTimerPlugin extends Plugin {
 	settings!: ChecklistTimerSettings;
 	sessionManager!: SessionManager;
 	private statusBarItemEl!: HTMLElement;
-	private activeTaskStatusBarEl!: HTMLElement;
 
 	async onload() {
 		await this.loadSettings();
 
-		this.statusBarItemEl = this.addStatusBarItem();
-
 		// Display-only (never registers a click handler) — the active task
 		// timer, shown only while enabled in settings and a session is running.
-		this.activeTaskStatusBarEl = this.addStatusBarItem();
-		this.activeTaskStatusBarEl.addClass('checklist-timer-active-task');
-		this.activeTaskStatusBarEl.hide();
+		this.statusBarItemEl = this.addStatusBarItem();
+		this.statusBarItemEl.addClass('checklist-timer-active-task');
+		this.statusBarItemEl.hide();
 
 		this.sessionManager = new SessionManager(
 			this.app.vault,
 			this.settings,
-			(status) => {
-				this.statusBarItemEl.setText(status);
-				this.updateActiveTaskStatusBar();
-			},
+			() => this.updateActiveTaskStatusBar(),
 			(message, options) => {
 				const notice = new Notice(message, options?.durationMs);
 				const filePath = options?.filePath;
@@ -134,20 +128,22 @@ export default class ChecklistTimerPlugin extends Plugin {
 
 	// Hidden whenever the setting is off or nothing is running (acceptance
 	// criteria: no task running, or the feature disabled, means no status bar
-	// item at all — not just an empty one).
+	// item at all — not just an empty one). Mirrors the compact "⏱ item: time"
+	// shape of the per-item notices (see SessionManager) instead of spelling
+	// out "Checklist timer: running" — one glance, not a sentence.
 	private updateActiveTaskStatusBar() {
 		if (!this.settings.showActiveTaskTimer) {
-			this.activeTaskStatusBarEl.hide();
+			this.statusBarItemEl.hide();
 			return;
 		}
 		const task = this.sessionManager.getActiveTask();
 		if (!task) {
-			this.activeTaskStatusBarEl.hide();
+			this.statusBarItemEl.hide();
 			return;
 		}
 		const elapsed = formatElapsed(Date.now() - task.startTime, this.settings.activeTaskTimerFormat);
-		this.activeTaskStatusBarEl.setText(`${truncateTaskName(task.name)} ${elapsed}`);
-		this.activeTaskStatusBarEl.show();
+		this.statusBarItemEl.setText(`⏱ ${truncateTaskName(task.name)}: ${elapsed}`);
+		this.statusBarItemEl.show();
 	}
 
 	async loadSettings() {

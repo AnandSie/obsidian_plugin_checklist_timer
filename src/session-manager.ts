@@ -56,7 +56,11 @@ export class SessionManager {
 	constructor(
 		private readonly vault: VaultAccess,
 		private settings: ChecklistTimerSettings,
-		private readonly onStatusChange: (status: string) => void,
+		// Fired whenever a session starts or ends — a "something changed,
+		// refresh your display" signal rather than a message to show; the
+		// active task timer (main.ts) derives what to render from
+		// getActiveTask() instead.
+		private readonly onStatusChange: () => void,
 		private readonly notify: Notifier,
 		private readonly now: () => number = Date.now,
 		// Obsidian's normalizePath() — cleans user-typed folder paths (stray
@@ -209,7 +213,7 @@ export class SessionManager {
 			currentItemText: block.items[startIndex + 1]?.text ?? title,
 		};
 		this.notify(`▶️ "${title}" started`);
-		this.onStatusChange(`Checklist timer: running (${title})`);
+		this.onStatusChange();
 	}
 
 	private normalizedFolder(): string {
@@ -264,7 +268,7 @@ export class SessionManager {
 		const session = this.activeSession;
 		if (!session) return;
 		this.activeSession = null;
-		this.onStatusChange('');
+		this.onStatusChange();
 
 		const outputFile = session.outputFile;
 		if (!outputFile) {

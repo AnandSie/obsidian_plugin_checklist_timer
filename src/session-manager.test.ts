@@ -122,12 +122,14 @@ function makeManager(
 ) {
 	const notices: string[] = [];
 	const noticeOptions: (NotifyOptions | undefined)[] = [];
-	const statuses: string[] = [];
+	let statusChangeCount = 0;
 	const settings: ChecklistTimerSettings = { ...DEFAULT_SETTINGS, ...overrides };
 	const manager = new SessionManager(
 		vault,
 		settings,
-		(status) => statuses.push(status),
+		() => {
+			statusChangeCount++;
+		},
 		(message, options) => {
 			notices.push(message);
 			noticeOptions.push(options);
@@ -136,7 +138,7 @@ function makeManager(
 		normalizePath,
 		editorAccess,
 	);
-	return { manager, notices, noticeOptions, statuses };
+	return { manager, notices, noticeOptions, getStatusChangeCount: () => statusChangeCount };
 }
 
 describe('SessionManager — basic sequential timing', () => {

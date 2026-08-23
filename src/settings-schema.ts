@@ -28,6 +28,7 @@ export interface ChecklistTimerSettings {
 	// intentionally incomplete run leaves the checklist as-is.
 	resetOnCompletion: boolean;
 	// Show the currently timed item and its elapsed time in the status bar.
+	// Default on — it's the plugin's main "yes, it's working" signal.
 	showActiveTaskTimer: boolean;
 	// Time format for the status bar elapsed time (see utils/format.ts).
 	activeTaskTimerFormat: TimeFormat;
@@ -40,6 +41,6 @@ export const DEFAULT_SETTINGS: ChecklistTimerSettings = {
 	outputFolder: '',
 	filenameTemplate: '{{date}} {{title}} timing',
 	resetOnCompletion: true,
-	showActiveTaskTimer: false,
+	showActiveTaskTimer: true,
 	activeTaskTimerFormat: 'mm:ss',
 };
