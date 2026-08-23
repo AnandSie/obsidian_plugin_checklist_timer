@@ -249,6 +249,14 @@ export class SessionManager {
 		return this.normalizePath(rawPath);
 	}
 
+	// Vault-relative path (no extension) for the Obsidian [[wikilink]] back to
+	// the checklist note that was timed — using the full path rather than just
+	// the title avoids resolving to the wrong note if another note elsewhere
+	// in the vault happens to share the same basename.
+	private sourceLinkTarget(session: ActiveSession): string {
+		return session.filePath.replace(/\.md$/, '');
+	}
+
 	private async appendItem(
 		session: ActiveSession,
 		text: string,
@@ -266,7 +274,7 @@ export class SessionManager {
 						// or our existence check was briefly stale) — harmless.
 					}
 				}
-				const header = `# Checklist timing — ${session.title}\n\n`;
+				const header = `# ${session.title} timing\n\nSource: [[${this.sourceLinkTarget(session)}]]\n\n## In order\n\n`;
 				session.outputFile = await this.vault.create(session.outputPath, header + line);
 			} else {
 				await this.writeNoteContent(session.outputFile, (current) => current + line);
@@ -302,8 +310,8 @@ export class SessionManager {
 				.map((result) => `- ${result.text}: ${formatDuration(result.durationMs)}`)
 				.join('\n');
 			const footer =
-				`\nTotal: ${formatDuration(totalMs)}${suffix}\n\n` +
-				`## Sorted by duration (slowest first)\n\n${slowestFirstLines}\n`;
+				`\n**Total:** ${formatDuration(totalMs)}${suffix}\n\n` +
+				`## Slowest first\n\n${slowestFirstLines}\n`;
 			try {
 				await this.writeNoteContent(outputFile, (current) => current + footer);
 				this.notify(

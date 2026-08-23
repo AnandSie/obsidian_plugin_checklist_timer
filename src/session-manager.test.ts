@@ -172,7 +172,7 @@ describe('SessionManager — basic sequential timing', () => {
 		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n- [ ] Three\n');
 		assert.equal(
 			vault.findContent('Week Plan timing'),
-			'# Checklist timing — Week Plan\n\n- Two: 00:00:05\n',
+			'# Week Plan timing\n\nSource: [[Week Plan]]\n\n## In order\n\n- Two: 00:00:05\n',
 		);
 
 		clock.advance(3_000);
@@ -180,11 +180,13 @@ describe('SessionManager — basic sequential timing', () => {
 
 		assert.equal(
 			vault.findContent('Week Plan timing'),
-			'# Checklist timing — Week Plan\n\n' +
+			'# Week Plan timing\n\n' +
+				'Source: [[Week Plan]]\n\n' +
+				'## In order\n\n' +
 				'- Two: 00:00:05\n' +
 				'- Three: 00:00:03\n' +
-				'\nTotal: 00:00:08\n\n' +
-				'## Sorted by duration (slowest first)\n\n' +
+				'\n**Total:** 00:00:08\n\n' +
+				'## Slowest first\n\n' +
 				'- Two: 00:00:05\n' +
 				'- Three: 00:00:03\n',
 		);
@@ -229,7 +231,7 @@ describe('SessionManager — basic sequential timing', () => {
 		await manager.stopActiveSession();
 
 		const content = vault.findContent('Note timing');
-		assert.ok(content?.includes('Total: 00:00:10 (stopped early)'));
+		assert.ok(content?.includes('**Total:** 00:00:10 (stopped early)'));
 		assert.ok(!content?.includes('Three'), 'unchecked item must not appear');
 		assert.ok(
 			notices.some((n) => n.includes('finished in') && n.includes('(stopped early)')),
@@ -460,14 +462,14 @@ describe('SessionManager — two checklists started while one is running', () =>
 		assert.ok(notices.includes('▶️ "Checklist B" started'), 'B must start');
 
 		const aContent = vault.findContent('Checklist A timing');
-		assert.ok(aContent?.includes('Total: 00:00:02 (stopped early)'));
+		assert.ok(aContent?.includes('**Total:** 00:00:02 (stopped early)'));
 		assert.ok(!aContent?.includes('Three'), 'A never reached its last item');
 
 		// B keeps timing normally after the switch.
 		clock.advance(1_000);
 		await manager.handleFileContent(fileB, '#timed\n- [x] Kickoff\n- [x] Wrap up\n');
 		const bContent = vault.findContent('Checklist B timing');
-		assert.ok(bContent?.includes('Total: 00:00:01\n'));
+		assert.ok(bContent?.includes('**Total:** 00:00:01\n'));
 		assert.ok(!bContent?.includes('stopped early'));
 	});
 
@@ -501,7 +503,7 @@ describe('SessionManager — two checklists started while one is running', () =>
 		clock.advance(6_000);
 		await manager.handleFileContent(fileA, '#timed\n- [x] Start\n- [x] Two\n');
 		const aContent = vault.findContent('Checklist A timing');
-		assert.ok(aContent?.includes('Total: 00:00:06\n'));
+		assert.ok(aContent?.includes('**Total:** 00:00:06\n'));
 		assert.ok(!aContent?.includes('stopped early'));
 	});
 
@@ -637,7 +639,7 @@ describe('SessionManager — reset checklist on completion', () => {
 
 		assert.ok(
 			outputEditor.getValue().includes('Three: 00:00:01') &&
-				outputEditor.getValue().includes('Total: 00:00:02'),
+				outputEditor.getValue().includes('**Total:** 00:00:02'),
 			'the per-item line and the finish footer should both land in the open editor',
 		);
 		assert.equal(
