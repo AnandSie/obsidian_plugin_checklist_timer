@@ -40,27 +40,34 @@ export interface OpenEditor {
 }
 
 export interface NotifyOptions {
-	// Vault-relative path to open (in the active leaf) if the user clicks the
+	// The output note to open (in the active leaf) if the user clicks the
 	// notice — used for the finish notice so it doubles as a shortcut to the
-	// result note.
-	filePath?: string;
+	// result note. Carries the TFile itself rather than a path string so a
+	// click/auto-open can't race a rename/move: Obsidian updates a TFile's
+	// .path in place rather than issuing a new object, so the reference
+	// stays valid without a second, potentially-stale lookup.
+	outputFile?: TFile;
 	// Overrides Obsidian's default auto-dismiss timeout (ms) for this notice.
 	durationMs?: number;
 	// Only set on the finish notice (and only when showReadingViewBarChart is
-	// on) — tells the click handler to open filePath straight into Reading
+	// on) — tells the click handler to open outputFile straight into Reading
 	// view instead of whatever mode the leaf would otherwise default to.
 	// Deliberately per-notice rather than a blanket check against the
 	// setting at click time: several other notices during a session also
-	// carry a filePath (e.g. the per-item "⏱ ..." notice, via
+	// carry an outputFile (e.g. the per-item "⏱ ..." notice, via
 	// resultFileOptions), and forcing those into Reading view too would
 	// yank a still-in-progress session's note out from under the user while
 	// they're mid-edit.
 	openInReadingView?: boolean;
-	// True only for the session-finish notice — signals that `filePath` is
-	// eligible for the autoOpenOutputNote setting to open it immediately,
-	// not just on click. Per-item notices also carry filePath (so they stay
-	// clickable) but never set this, since opening the note on every single
-	// check-off would be disruptive rather than helpful.
+	// True only for the session-finish notice, and only when
+	// autoOpenOutputNote is on and this isn't the incidental stop of an
+	// auto-switch (see finishSession's suppressAutoOpen) — tells main.ts to
+	// open outputFile immediately, not just on click. Resolved here rather
+	// than left for main.ts to re-check the setting, so main.ts can treat
+	// every flag on this object the same way (read, don't reinterpret).
+	// Per-item notices also carry an outputFile (so they stay clickable) but
+	// never set this, since opening the note on every single check-off
+	// would be disruptive rather than helpful.
 	autoOpen?: boolean;
 }
 

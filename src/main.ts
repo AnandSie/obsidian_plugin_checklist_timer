@@ -47,20 +47,27 @@ export default class ChecklistTimerPlugin extends Plugin {
 			() => this.updateActiveTaskStatusBar(),
 			(message, options) => {
 				const notice = new Notice(message, options?.durationMs);
-				const filePath = options?.filePath;
-				if (!filePath) return;
+				const file = options?.outputFile;
+				if (!file) return;
 				// noticeEl (not the 1.8.7+ messageEl) so click-to-open still works
 				// down to this plugin's minAppVersion.
 				notice.noticeEl.addClass('checklist-timer-clickable-notice');
-				notice.noticeEl.addEventListener('click', () => {
-					this.openOutputFile(filePath, options?.openInReadingView);
-				});
-				// autoOpen is only set on the session-finish notice (see the
-				// NotifyOptions doc comment in timer-port.ts) — per-item notices
-				// carry filePath too, but only for click-to-open, not this.
-				if (options?.autoOpen && this.settings.autoOpenOutputNote) {
-					this.openOutputFile(filePath, options?.openInReadingView);
-				}
+				// Guards against opening the note twice — once via autoOpen below,
+				// once more if the user then clicks the same notice (it stays
+				// clickable for its full visible duration) — which would otherwise
+				// re-run getLeaf(false).openFile() on a file already open there.
+				let opened = false;
+				const open = () => {
+					if (opened) return;
+					opened = true;
+					this.openOutputFile(file, options?.openInReadingView);
+				};
+				notice.noticeEl.addEventListener('click', open);
+				// autoOpen is already resolved against autoOpenOutputNote (and
+				// against the auto-switch edge case) in session-manager.ts — see
+				// the NotifyOptions doc comment — so it's read as-is here rather
+				// than re-checked against settings.
+				if (options?.autoOpen) open();
 			},
 			Date.now,
 			normalizePath,
@@ -165,12 +172,12 @@ export default class ChecklistTimerPlugin extends Plugin {
 	// Shared by the finish notice's click handler and its autoOpenOutputNote
 	// auto-open — openInReadingView is only ever set on the finish notice
 	// (see NotifyOptions), so both paths land in the same place either way.
-	private openOutputFile(filePath: string, openInReadingView?: boolean) {
-		const file = this.app.vault.getAbstractFileByPath(filePath);
-		if (file instanceof TFile) {
-			const openState = openInReadingView ? { state: { mode: 'preview' } } : undefined;
-			void this.app.workspace.getLeaf(false).openFile(file, openState);
-		}
+	// Takes the TFile directly (NotifyOptions.outputFile) rather than a path
+	// to resolve — SessionManager already holds the live TFile it just wrote
+	// to, so there's no separate lookup here to race a rename/delete.
+	private openOutputFile(file: TFile, openInReadingView?: boolean) {
+		const openState = openInReadingView ? { state: { mode: 'preview' } } : undefined;
+		void this.app.workspace.getLeaf(false).openFile(file, openState);
 	}
 
 	// Wraps the real Vault so SessionManager gets a proper TFile-or-null from

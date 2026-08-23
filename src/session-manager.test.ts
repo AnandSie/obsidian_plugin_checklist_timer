@@ -278,9 +278,9 @@ describe('SessionManager — basic sequential timing', () => {
 
 		const outputPath = [...vault.files.keys()][0];
 		assert.equal(
-			noticeOptions[finishIndex]?.filePath,
+			noticeOptions[finishIndex]?.outputFile?.path,
 			outputPath,
-			'the finish notice should carry the output path so it can be opened on click',
+			'the finish notice should carry the output file so it can be opened on click',
 		);
 		assert.ok(
 			(noticeOptions[finishIndex]?.durationMs ?? 0) > 5000,
@@ -293,7 +293,7 @@ describe('SessionManager — basic sequential timing', () => {
 		);
 		assert.ok(
 			noticeOptions.filter((options) => options?.autoOpen).length === 1,
-			'per-item notices must not set autoOpen even though they also carry filePath',
+			'per-item notices must not set autoOpen even though they also carry outputFile',
 		);
 	});
 
@@ -509,7 +509,9 @@ describe('SessionManager — two checklists started while one is running', () =>
 	});
 
 	it('auto-switch (default): stops the first checklist and starts the second', async () => {
-		const { manager, notices } = makeManager(vault, clock, { autoSwitchSessions: true });
+		const { manager, notices, noticeOptions } = makeManager(vault, clock, {
+			autoSwitchSessions: true,
+		});
 		const fileA = sourceFile('Checklist A.md');
 		const fileB = sourceFile('Checklist B.md');
 
@@ -526,8 +528,13 @@ describe('SessionManager — two checklists started while one is running', () =>
 			notices.some((n) => n.includes('stopping "Checklist A" first')),
 			'should explain why A was stopped',
 		);
-		assert.ok(notices.some((n) => n.includes('finished in')), 'A must be saved');
+		const aFinishIndex = notices.findIndex((n) => n.includes('finished in'));
+		assert.notEqual(aFinishIndex, -1, 'A must be saved');
 		assert.ok(notices.includes('▶️ "Checklist B" started'), 'B must start');
+		assert.ok(
+			!noticeOptions[aFinishIndex]?.autoOpen,
+			"A's incidental auto-switch stop must not auto-open its note — the user is mid-check-off on B, not asking to see A's results",
+		);
 
 		const aContent = vault.findContent('Checklist A timing');
 		assert.ok(aContent?.includes('**Total:** 00:00:02 (stopped early)'));
@@ -590,7 +597,7 @@ describe('SessionManager — two checklists started while one is running', () =>
 		const notTrackedYetIndex = notices.findIndex((n) => n.includes("won't be tracked"));
 		assert.notEqual(notTrackedYetIndex, -1);
 		assert.equal(
-			noticeOptions[notTrackedYetIndex]?.filePath,
+			noticeOptions[notTrackedYetIndex]?.outputFile,
 			undefined,
 			'A has no timed items yet, so there is nothing to open',
 		);
@@ -607,7 +614,7 @@ describe('SessionManager — two checklists started while one is running', () =>
 			(n, i) => n.includes("won't be tracked") && i > notTrackedYetIndex,
 		);
 		assert.notEqual(notTrackedIndex, -1);
-		assert.equal(noticeOptions[notTrackedIndex]?.filePath, outputPath);
+		assert.equal(noticeOptions[notTrackedIndex]?.outputFile?.path, outputPath);
 	});
 
 	it('re-checking the start item of the already-active checklist is a no-op, not a restart', async () => {
@@ -766,6 +773,34 @@ describe('SessionManager — reset checklist on completion', () => {
 		await tick(manager, file, '#timed\n- [x] Start\n- [x] Two\n');
 
 		assert.ok(notices.some((n) => n.includes('failed to reset checklist in Week Plan.md')));
+	});
+
+	it('resets the source checklist before firing the finish notice, so an auto-opened note can never race a not-yet-reset editor', async () => {
+		const { manager, notices } = makeManager(vault, clock);
+		const file = sourceFile('Week Plan.md');
+
+		let noticeCountWhenReset: number | null = null;
+		const originalModify = vault.modify.bind(vault);
+		vault.modify = async (target, content) => {
+			const path = (target as unknown as { path: string }).path;
+			if (path === file.path && noticeCountWhenReset === null) {
+				noticeCountWhenReset = notices.length;
+			}
+			await originalModify(target, content);
+		};
+
+		await tick(manager, file, '#timed\n- [ ] Start\n- [ ] Two\n');
+		await tick(manager, file, '#timed\n- [x] Start\n- [ ] Two\n');
+		clock.advance(1_000);
+		await tick(manager, file, '#timed\n- [x] Start\n- [x] Two\n');
+
+		const finishIndex = notices.findIndex((n) => n.includes('finished in'));
+		assert.notEqual(finishIndex, -1);
+		assert.notEqual(noticeCountWhenReset, null, 'the reset write must have happened');
+		assert.ok(
+			(noticeCountWhenReset ?? Infinity) <= finishIndex,
+			'the checklist reset must complete before the finish notice (and its possible auto-open navigation) fires',
+		);
 	});
 });
 

@@ -165,7 +165,10 @@ export class SessionManager {
 						`Checklist timer: starting a new checklist — stopping "${session.title}" first.`,
 						this.resultFileOptions(session),
 					);
-					await this.finishSession('stopped');
+					// suppressAutoOpen: the user is mid-check-off on a *new*
+					// checklist, not asking to see the old one's results — see
+					// finishSession's doc comment on this parameter.
+					await this.finishSession('stopped', undefined, undefined, { suppressAutoOpen: true });
 				} else {
 					this.notify(
 						`Checklist timer: "${session.title}" is already being timed — this checklist won't be tracked. Turn on auto-switch in settings to switch automatically instead.`,
@@ -314,6 +317,14 @@ export class SessionManager {
 		reason: 'completed' | 'stopped',
 		sourceFile?: TFile,
 		sourceBlock?: ChecklistBlock,
+		// True only for the incidental stop inside handleItemChecked's
+		// auto-switch branch: there, "finishing" the old session is a side
+		// effect of the user starting a *new* checklist, not something they
+		// asked to see — auto-opening the old session's note there would yank
+		// them away from the checklist they just started checking off. A real
+		// user-initiated stop (stopActiveSession) leaves this false, since
+		// seeing the result *is* what they asked for.
+		{ suppressAutoOpen = false }: { suppressAutoOpen?: boolean } = {},
 	) {
 		const session = this.activeSession;
 		if (!session) return;
@@ -321,11 +332,17 @@ export class SessionManager {
 		this.onStatusChange();
 
 		const outputFile = session.outputFile;
-		if (!outputFile) {
-			this.notify('Checklist timer: stopped (no items timed).');
-		} else {
-			const suffix = reason === 'stopped' ? ' (stopped early)' : '';
-			const totalMs = session.results.reduce((sum, result) => sum + result.durationMs, 0);
+		let totalMs = 0;
+		let suffix = '';
+		// Stringified inside the catch (matching resetChecklistBlock's pattern
+		// below) rather than storing the raw `unknown` error — narrowing an
+		// `unknown` variable with a later truthy check turns it into a bare
+		// `{}` for the type checker, which no-base-to-string then flags as
+		// unsafe to String().
+		let footerErrorMessage: string | null = null;
+		if (outputFile) {
+			suffix = reason === 'stopped' ? ' (stopped early)' : '';
+			totalMs = session.results.reduce((sum, result) => sum + result.durationMs, 0);
 			const slowestFirst = [...session.results].sort((a, b) => b.durationMs - a.durationMs);
 			const slowestFirstLines = slowestFirst
 				.map((result) => `- ${formatDuration(result.durationMs)} - ${result.text}`)
@@ -335,30 +352,42 @@ export class SessionManager {
 				`## Slowest first\n\n${slowestFirstLines}\n`;
 			try {
 				await this.writeNoteContent(outputFile, (current) => current + footer);
-				this.notify(
-					`✅ "${session.title}" finished in ${formatDuration(totalMs)}${suffix} — click to open results`,
-					{
-						filePath: outputFile.path,
-						durationMs: FINISH_NOTICE_DURATION_MS,
-						openInReadingView: this.settings.showReadingViewBarChart,
-						autoOpen: true,
-					},
-				);
 			} catch (err) {
-				this.notify(
-					`Checklist timer: failed to write total to ${session.outputPath} (${String(err)})`,
-					{ filePath: outputFile.path },
-				);
+				footerErrorMessage = String(err);
 			}
 		}
 
-		// Only a natural finish (last item checked) resets the checklist — a
-		// manual stop means the run was intentionally left incomplete, so the
-		// checklist is left as-is rather than blanking out real progress. Runs
-		// even when nothing was ever timed (e.g. the start item is also the
-		// block's last item), since that's still a completed run.
+		// Reset (when applicable) before the finish notice below, since that
+		// notice may itself navigate a leaf (autoOpenOutputNote) — the reset
+		// write needs the source note's live editor still discoverable via
+		// EditorAccess.getOpenEditor, which a navigation away from it could
+		// otherwise race. Only a natural finish (last item checked) resets
+		// the checklist — a manual stop means the run was intentionally left
+		// incomplete, so the checklist is left as-is rather than blanking out
+		// real progress. Runs even when nothing was ever timed (e.g. the
+		// start item is also the block's last item), since that's still a
+		// completed run.
 		if (reason === 'completed' && this.settings.resetOnCompletion && sourceFile && sourceBlock) {
 			await this.resetChecklistBlock(sourceFile, sourceBlock);
+		}
+
+		if (!outputFile) {
+			this.notify('Checklist timer: stopped (no items timed).');
+		} else if (footerErrorMessage !== null) {
+			this.notify(
+				`Checklist timer: failed to write total to ${session.outputPath} (${footerErrorMessage})`,
+				{ outputFile },
+			);
+		} else {
+			this.notify(
+				`✅ "${session.title}" finished in ${formatDuration(totalMs)}${suffix} — click to open results`,
+				{
+					outputFile,
+					durationMs: FINISH_NOTICE_DURATION_MS,
+					openInReadingView: this.settings.showReadingViewBarChart,
+					autoOpen: !suppressAutoOpen && this.settings.autoOpenOutputNote,
+				},
+			);
 		}
 	}
 
@@ -402,9 +431,6 @@ export class SessionManager {
 	// ActiveSession.outputFile), so early-session notices have nothing to
 	// point to yet.
 	private resultFileOptions(session: ActiveSession): NotifyOptions | undefined {
-		// .path (not the once-computed outputPath) so a click still resolves
-		// correctly even if the note was renamed/moved mid-session — Obsidian
-		// updates a TFile's .path in place rather than issuing a new object.
-		return session.outputFile ? { filePath: session.outputFile.path } : undefined;
+		return session.outputFile ? { outputFile: session.outputFile } : undefined;
 	}
 }
