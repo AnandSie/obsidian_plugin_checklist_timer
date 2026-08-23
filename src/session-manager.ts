@@ -204,7 +204,7 @@ export class SessionManager {
 
 		const wrote = await this.appendItem(session, item.text, duration);
 		if (wrote) {
-			this.notify(`⏱ ${item.text}: ${formatDuration(duration)}`, this.resultFileOptions(session));
+			this.notify(`⏱ ${formatDuration(duration)} - ${item.text}`, this.resultFileOptions(session));
 		}
 
 		if (index === block.items.length - 1) {
@@ -249,12 +249,20 @@ export class SessionManager {
 		return this.normalizePath(rawPath);
 	}
 
+	// Vault-relative path (no extension) for the Obsidian [[wikilink]] back to
+	// the checklist note that was timed — using the full path rather than just
+	// the title avoids resolving to the wrong note if another note elsewhere
+	// in the vault happens to share the same basename.
+	private sourceLinkTarget(session: ActiveSession): string {
+		return session.filePath.replace(/\.md$/, '');
+	}
+
 	private async appendItem(
 		session: ActiveSession,
 		text: string,
 		durationMs: number,
 	): Promise<boolean> {
-		const line = `- ${text}: ${formatDuration(durationMs)}\n`;
+		const line = `- ${formatDuration(durationMs)} - ${text}\n`;
 		try {
 			if (!session.outputFile) {
 				const folder = this.normalizedFolder();
@@ -266,7 +274,7 @@ export class SessionManager {
 						// or our existence check was briefly stale) — harmless.
 					}
 				}
-				const header = `# Checklist timing — ${session.title}\n\n`;
+				const header = `# ${session.title} timing\n\nSource: [[${this.sourceLinkTarget(session)}]]\n\n## In order\n\n`;
 				const existing = this.settings.overwriteExistingFile
 					? this.vault.getExistingFile(session.outputPath)
 					: null;
@@ -313,11 +321,11 @@ export class SessionManager {
 			const totalMs = session.results.reduce((sum, result) => sum + result.durationMs, 0);
 			const slowestFirst = [...session.results].sort((a, b) => b.durationMs - a.durationMs);
 			const slowestFirstLines = slowestFirst
-				.map((result) => `- ${result.text}: ${formatDuration(result.durationMs)}`)
+				.map((result) => `- ${formatDuration(result.durationMs)} - ${result.text}`)
 				.join('\n');
 			const footer =
-				`\nTotal: ${formatDuration(totalMs)}${suffix}\n\n` +
-				`## Sorted by duration (slowest first)\n\n${slowestFirstLines}\n`;
+				`\n**Total:** ${formatDuration(totalMs)}${suffix}\n\n` +
+				`## Slowest first\n\n${slowestFirstLines}\n`;
 			try {
 				await this.writeNoteContent(outputFile, (current) => current + footer);
 				this.notify(
