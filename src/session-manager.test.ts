@@ -180,7 +180,7 @@ describe('SessionManager — basic sequential timing', () => {
 		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n- [ ] Three\n');
 		assert.equal(
 			vault.findContent('Week Plan timing'),
-			'# Week Plan timing\n\nSource: [[Week Plan]]\n\n## In order\n\n- Two: 00:00:05\n',
+			'# Week Plan timing\n\nSource: [[Week Plan]]\n\n## In order\n\n- 00:00:05: Two\n',
 		);
 
 		clock.advance(3_000);
@@ -191,12 +191,12 @@ describe('SessionManager — basic sequential timing', () => {
 			'# Week Plan timing\n\n' +
 				'Source: [[Week Plan]]\n\n' +
 				'## In order\n\n' +
-				'- Two: 00:00:05\n' +
-				'- Three: 00:00:03\n' +
+				'- 00:00:05: Two\n' +
+				'- 00:00:03: Three\n' +
 				'\n**Total:** 00:00:08\n\n' +
 				'## Slowest first\n\n' +
-				'- Two: 00:00:05\n' +
-				'- Three: 00:00:03\n',
+				'- 00:00:05: Two\n' +
+				'- 00:00:03: Three\n',
 		);
 		assert.ok(notices.some((n) => n.includes('finished in') && n.includes('click to open')));
 	});
@@ -566,7 +566,7 @@ describe('SessionManager — two checklists started while one is running', () =>
 		clock.advance(1_000);
 		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n');
 		const content = vault.findContent('Note timing');
-		assert.ok(content?.includes('Two: 00:00:01'), 'the original session must still be intact');
+		assert.ok(content?.includes('00:00:01: Two'), 'the original session must still be intact');
 	});
 });
 
@@ -646,7 +646,7 @@ describe('SessionManager — reset checklist on completion', () => {
 		await tick(manager, file, '#timed\n- [x] Start\n- [x] Two\n- [x] Three\n');
 
 		assert.ok(
-			outputEditor.getValue().includes('Three: 00:00:01') &&
+			outputEditor.getValue().includes('00:00:01: Three') &&
 				outputEditor.getValue().includes('**Total:** 00:00:02'),
 			'the per-item line and the finish footer should both land in the open editor',
 		);
@@ -822,10 +822,10 @@ describe('SessionManager — overwrite existing file setting', () => {
 			'# Week Plan timing\n\n' +
 				'Source: [[Week Plan]]\n\n' +
 				'## In order\n\n' +
-				'- Two: 00:00:01\n' +
+				'- 00:00:01: Two\n' +
 				'\n**Total:** 00:00:01\n\n' +
 				'## Slowest first\n\n' +
-				'- Two: 00:00:01\n',
+				'- 00:00:01: Two\n',
 		);
 		assert.ok(
 			!notices.some((n) => n.includes('already exists')),
@@ -853,7 +853,7 @@ describe('SessionManager — overwrite existing file setting', () => {
 		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n');
 
 		assert.ok(
-			outputEditor.getValue().includes('Two: 00:00:01') &&
+			outputEditor.getValue().includes('00:00:01: Two') &&
 				!outputEditor.getValue().includes('stale content'),
 			'the live editor buffer should be fully replaced',
 		);
@@ -902,7 +902,7 @@ describe('SessionManager — overwrite existing file setting', () => {
 		clock.advance(1_000);
 		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n');
 
-		assert.ok(vault.findContent('Week Plan timing')?.includes('Two: 00:00:01'));
+		assert.ok(vault.findContent('Week Plan timing')?.includes('00:00:01: Two'));
 	});
 });
 
