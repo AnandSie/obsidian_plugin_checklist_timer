@@ -267,7 +267,21 @@ export class SessionManager {
 					}
 				}
 				const header = `# Checklist timing — ${session.title}\n\n`;
-				session.outputFile = await this.vault.create(session.outputPath, header + line);
+				const existing = this.settings.overwriteExistingFile
+					? this.vault.getExistingFile(session.outputPath)
+					: null;
+				if (existing) {
+					// Fully replace — the mutate callback ignores `current` rather than
+					// appending to it, so any prior content is discarded. Still routed
+					// through writeNoteContent (not a raw vault.modify) so a same-path
+					// note already open in an editor is overwritten there too,
+					// consistent with every other write path — see CLAUDE.md. skipRead
+					// avoids reading the very content this call is about to discard.
+					await this.writeNoteContent(existing, () => header + line, { skipRead: true });
+					session.outputFile = existing;
+				} else {
+					session.outputFile = await this.vault.create(session.outputPath, header + line);
+				}
 			} else {
 				await this.writeNoteContent(session.outputFile, (current) => current + line);
 			}
@@ -343,13 +357,23 @@ export class SessionManager {
 	// why a raw vault.modify() is unsafe in that case. Always reads the
 	// live/current content (from the editor, or fresh off disk) rather than a
 	// stale snapshot, so callers never need to thread content through.
-	private async writeNoteContent(file: TFile, mutate: (current: string) => string): Promise<void> {
+	private async writeNoteContent(
+		file: TFile,
+		mutate: (current: string) => string,
+		// skipRead: for a caller whose mutate() ignores `current` entirely
+		// (a full overwrite) — skips the disk read of content that's about to
+		// be discarded anyway. Only safe when no editor has the file open,
+		// which is exactly the branch below that would otherwise call
+		// vault.read(); the editor branch already gets its content for free
+		// via editor.getValue(), so it's unaffected either way.
+		{ skipRead = false }: { skipRead?: boolean } = {},
+	): Promise<void> {
 		const editor = this.editorAccess.getOpenEditor(file.path);
 		if (editor) {
 			editor.setValue(mutate(editor.getValue()));
 			return;
 		}
-		const current = await this.vault.read(file);
+		const current = skipRead ? '' : await this.vault.read(file);
 		await this.vault.modify(file, mutate(current));
 	}
 

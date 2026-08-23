@@ -34,6 +34,12 @@ class FakeVault implements VaultAccess {
 		return null;
 	}
 
+	// Mirrors real Obsidian's TFile/TFolder distinction: only a path tracked
+	// in `files` (created via create(), never createFolder()) counts.
+	getExistingFile(path: string): TFile | null {
+		return this.files.has(path) ? ({ path } as unknown as TFile) : null;
+	}
+
 	async createFolder(path: string): Promise<unknown> {
 		this.folders.add(path);
 		return { path };
@@ -41,7 +47,9 @@ class FakeVault implements VaultAccess {
 
 	async create(path: string, content: string): Promise<TFile> {
 		if (this.gate) await this.gate;
-		if (this.files.has(path)) throw new Error(`already exists: ${path}`);
+		if (this.files.has(path) || this.folders.has(path)) {
+			throw new Error(`already exists: ${path}`);
+		}
 		this.files.set(path, content);
 		return { path } as unknown as TFile;
 	}
@@ -752,6 +760,145 @@ describe('SessionManager — start item is also the block’s last item', () => 
 			'#timed\n- [ ] Only step\n',
 			'a completed run resets the checklist even when nothing was ever timed',
 		);
+	});
+});
+
+describe('SessionManager — overwrite existing file setting', () => {
+	let vault: FakeVault;
+	let clock: FakeClock;
+
+	beforeEach(() => {
+		vault = new FakeVault();
+		clock = new FakeClock();
+	});
+
+	it('off (default): fails to write and reports the existing "already exists" error', async () => {
+		const { manager, notices } = makeManager(vault, clock, {
+			filenameTemplate: '{{title}} timing',
+		});
+		const file = sourceFile('Week Plan.md');
+
+		vault.files.set('Week Plan timing.md', 'pre-existing content');
+
+		await manager.handleFileContent(file, '#timed\n- [ ] Start\n- [ ] Two\n');
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [ ] Two\n');
+		clock.advance(1_000);
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n');
+
+		assert.equal(
+			vault.files.get('Week Plan timing.md'),
+			'pre-existing content',
+			'the pre-existing file must be left untouched',
+		);
+		assert.ok(
+			notices.some((n) => n.includes('failed to write to') && n.includes('already exists')),
+			'the existing "file already exists" error notice must still fire',
+		);
+	});
+
+	it('on: fully replaces the existing file’s content rather than appending or erroring', async () => {
+		const { manager, notices } = makeManager(vault, clock, {
+			overwriteExistingFile: true,
+			filenameTemplate: '{{title}} timing',
+		});
+		const file = sourceFile('Week Plan.md');
+
+		vault.files.set('Week Plan timing.md', 'stale content that must be discarded');
+
+		await manager.handleFileContent(file, '#timed\n- [ ] Start\n- [ ] Two\n');
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [ ] Two\n');
+		clock.advance(1_000);
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n');
+
+		const content = vault.files.get('Week Plan timing.md');
+		assert.ok(
+			!content?.includes('stale content'),
+			'old content must be completely discarded, not merged or appended to',
+		);
+		assert.equal(
+			content,
+			'# Checklist timing — Week Plan\n\n' +
+				'- Two: 00:00:01\n' +
+				'\nTotal: 00:00:01\n\n' +
+				'## Sorted by duration (slowest first)\n\n' +
+				'- Two: 00:00:01\n',
+		);
+		assert.ok(
+			!notices.some((n) => n.includes('already exists')),
+			'overwriting must complete normally, as if the file never existed',
+		);
+	});
+
+	it('on: writes through an open editor instead of vault.modify when the existing file is open in a pane', async () => {
+		const editorAccess = new FakeEditorAccess();
+		const { manager } = makeManager(
+			vault,
+			clock,
+			{ overwriteExistingFile: true, filenameTemplate: '{{title}} timing' },
+			undefined,
+			editorAccess,
+		);
+		const file = sourceFile('Week Plan.md');
+
+		vault.files.set('Week Plan timing.md', 'stale content');
+		const outputEditor = editorAccess.open('Week Plan timing.md', 'stale content');
+
+		await manager.handleFileContent(file, '#timed\n- [ ] Start\n- [ ] Two\n');
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [ ] Two\n');
+		clock.advance(1_000);
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n');
+
+		assert.ok(
+			outputEditor.getValue().includes('Two: 00:00:01') &&
+				!outputEditor.getValue().includes('stale content'),
+			'the live editor buffer should be fully replaced',
+		);
+		assert.equal(
+			vault.files.get('Week Plan timing.md'),
+			'stale content',
+			'vault.modify must not have been used while the note is open in an editor',
+		);
+	});
+
+	it('on: a folder at the resolved path is not mistaken for a file to overwrite', async () => {
+		const { manager, notices } = makeManager(vault, clock, {
+			overwriteExistingFile: true,
+			filenameTemplate: '{{title}} timing',
+		});
+		const file = sourceFile('Week Plan.md');
+
+		// A folder happens to sit at the exact path the output note would
+		// resolve to — getExistingFile must not treat it as an overwritable
+		// file, and the normal create() path (which itself fails against a
+		// same-path folder) should run instead.
+		vault.folders.add('Week Plan timing.md');
+
+		await manager.handleFileContent(file, '#timed\n- [ ] Start\n- [ ] Two\n');
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [ ] Two\n');
+		clock.advance(1_000);
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n');
+
+		assert.equal(
+			vault.files.has('Week Plan timing.md'),
+			false,
+			'a folder must never be silently overwritten as if it were the output file',
+		);
+		assert.ok(
+			notices.some((n) => n.includes('failed to write to')),
+			'the collision should surface as the normal write-failure notice, not a silent success',
+		);
+	});
+
+	it('off: does not affect a session whose output file does not yet exist', async () => {
+		const { manager } = makeManager(vault, clock);
+		const file = sourceFile('Week Plan.md');
+
+		await manager.handleFileContent(file, '#timed\n- [ ] Start\n- [ ] Two\n');
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [ ] Two\n');
+		clock.advance(1_000);
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n');
+
+		assert.ok(vault.findContent('Week Plan timing')?.includes('Two: 00:00:01'));
 	});
 });
 
