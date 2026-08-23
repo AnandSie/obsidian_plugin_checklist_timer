@@ -274,3 +274,12 @@ identifying checklists) over inventing a new mechanism.
 - Configurable duration granularity (minutes-only, milliseconds).
 - Filename templates that integrate with existing note templates (e.g.
   Templater).
+
+## Open design questions
+
+See `BACKLOG.md` for open design/architecture questions on *existing* code
+(as opposed to the unbuilt-feature backlog above) — mostly review feedback
+that didn't block a merge but deserves a deliberate decision rather than a
+silent resolve later. Claude: check it every so often — e.g. when starting
+new work in an area it touches, or every few sessions — since nothing else
+will surface it again once its originating PR is merged and out of view.
