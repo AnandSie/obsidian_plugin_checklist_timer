@@ -40,6 +40,14 @@ export interface ChecklistTimerSettings {
 	// file's contents is a data-loss risk, so it's an opt-in convenience
 	// rather than the default.
 	overwriteExistingFile: boolean;
+	// When true, each timed item gets a small rendered bar next to it, sized
+	// relative to the slowest item, when the output note is viewed in
+	// Reading view. Computed at render time (not write time), so — unlike
+	// showPlainTextBarChart — it applies to both the "In order" and "Slowest
+	// first" lists. Reading view only; Live Preview/Source mode are a
+	// separate rendering path and are intentionally not touched. Default
+	// off, like the plugin's other settings that change what gets shown.
+	showReadingViewBarChart: boolean;
 }
 
 export const DEFAULT_SETTINGS: ChecklistTimerSettings = {
@@ -52,4 +60,5 @@ export const DEFAULT_SETTINGS: ChecklistTimerSettings = {
 	showActiveTaskTimer: true,
 	activeTaskTimerFormat: 'mm:ss',
 	overwriteExistingFile: false,
+	showReadingViewBarChart: false,
 };

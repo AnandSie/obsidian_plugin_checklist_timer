@@ -14,6 +14,7 @@ import {
 import { SessionManager } from './session-manager';
 import { EditorAccess, OpenEditor, VaultAccess } from './timer-port';
 import { formatElapsed, truncateTaskName } from './utils/format';
+import { computeBarFractions, parseDurationMs } from './utils/duration-bars';
 
 // Status bar tick cadence. formatElapsed only changes visibly every minute
 // for the 'hh:mm' format, but ticking every second regardless is simpler
@@ -54,7 +55,14 @@ export default class ChecklistTimerPlugin extends Plugin {
 				notice.noticeEl.addEventListener('click', () => {
 					const file = this.app.vault.getAbstractFileByPath(filePath);
 					if (file instanceof TFile) {
-						void this.app.workspace.getLeaf(false).openFile(file);
+						// Opens straight into Reading view (rather than whatever mode
+						// the leaf would otherwise default to) only when the bar chart
+						// is actually on — otherwise there's nothing Reading-view-only
+						// to show, so respect the user's normal default mode instead.
+						const openState = this.settings.showReadingViewBarChart
+							? { state: { mode: 'preview' } }
+							: undefined;
+						void this.app.workspace.getLeaf(false).openFile(file, openState);
 					}
 				});
 			},
@@ -76,6 +84,17 @@ export default class ChecklistTimerPlugin extends Plugin {
 		});
 
 		this.addSettingTab(new ChecklistTimerSettingTab(this.app, this));
+
+		// Reading view only (see CLAUDE.md/the bar chart brief) — this
+		// post-processor runs on Reading view's rendered HTML, a separate path
+		// from Live Preview/Source mode's CodeMirror editor, which this plugin
+		// deliberately does not touch for this feature (an earlier attempt at
+		// injecting into Live Preview crashed the plugin with internal
+		// CodeMirror errors).
+		this.registerMarkdownPostProcessor((el) => {
+			if (!this.settings.showReadingViewBarChart) return;
+			this.renderDurationBars(el);
+		});
 
 		this.registerEvent(
 			this.app.workspace.on('editor-change', (editor, info) => {
@@ -108,6 +127,28 @@ export default class ChecklistTimerPlugin extends Plugin {
 
 	private resolveFile(info: MarkdownView | MarkdownFileInfo): TFile | null {
 		return info.file ?? null;
+	}
+
+	// Finds rendered list items that look like an output note's timed-item
+	// lines (see utils/duration-bars.ts) and gives each one a small bar sized
+	// relative to the slowest duration among the items in this same call. A
+	// single list (e.g. the "In order" list, or the "Slowest first" list) is
+	// always rendered as one call rather than split across several, so
+	// computing the max within just this call's items is enough — no need to
+	// read the rest of the note to find the true document-wide max, since
+	// every list in this note format contains the same full set of items.
+	private renderDurationBars(el: HTMLElement) {
+		const candidates = Array.from(el.querySelectorAll('li'))
+			.map((li) => ({ li, durationMs: parseDurationMs(li.textContent?.trim() ?? '') }))
+			.filter((entry): entry is { li: HTMLLIElement; durationMs: number } => entry.durationMs !== null);
+		if (candidates.length === 0) return;
+
+		const fractions = computeBarFractions(candidates.map((entry) => entry.durationMs));
+		candidates.forEach(({ li }, index) => {
+			const track = li.createDiv({ cls: 'checklist-timer-bar-track' });
+			const fill = track.createDiv({ cls: 'checklist-timer-bar-fill' });
+			fill.style.width = `${Math.round((fractions[index] ?? 0) * 100)}%`;
+		});
 	}
 
 	// Wraps the real Vault so SessionManager gets a proper TFile-or-null from

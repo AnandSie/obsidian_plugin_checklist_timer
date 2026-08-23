@@ -274,7 +274,13 @@ export class SessionManager {
 						// or our existence check was briefly stale) — harmless.
 					}
 				}
-				const header = `# ${session.title} timing\n\nSource: [[${this.sourceLinkTarget(session)}]]\n\n## In order\n\n`;
+				// Static, written once into the note itself (rather than e.g. only
+				// in a notice) so the hint is still there for anyone who opens the
+				// note later on, not just right after the session ends.
+				const barChartHint = this.settings.showReadingViewBarChart
+					? '> [!tip] Switch to Reading view (📖 the book icon) to see each item as a bar chart.\n\n'
+					: '';
+				const header = `# ${session.title} timing\n\nSource: [[${this.sourceLinkTarget(session)}]]\n\n${barChartHint}## In order\n\n`;
 				const existing = this.settings.overwriteExistingFile
 					? this.vault.getExistingFile(session.outputPath)
 					: null;

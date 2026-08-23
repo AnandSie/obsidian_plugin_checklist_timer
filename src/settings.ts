@@ -102,6 +102,14 @@ export class ChecklistTimerSettingTab extends PluginSettingTab {
 					key: 'overwriteExistingFile',
 				},
 			},
+			{
+				name: 'Reading view bar chart',
+				desc: 'Show a small rendered bar next to each timed item, sized relative to the slowest item, when the output note is viewed in Reading view. Reading view only — it does not appear in Live Preview or Source mode.',
+				control: {
+					type: 'toggle',
+					key: 'showReadingViewBarChart',
+				},
+			},
 		];
 	}
 
@@ -140,6 +148,9 @@ export class ChecklistTimerSettingTab extends PluginSettingTab {
 				break;
 			case 'overwriteExistingFile':
 				this.plugin.settings.overwriteExistingFile = value as boolean;
+				break;
+			case 'showReadingViewBarChart':
+				this.plugin.settings.showReadingViewBarChart = value as boolean;
 				break;
 		}
 		return this.plugin.saveSettings();
@@ -273,6 +284,20 @@ export class ChecklistTimerSettingTab extends PluginSettingTab {
 					.setValue(this.plugin.settings.overwriteExistingFile)
 					.onChange(async (value) => {
 						this.plugin.settings.overwriteExistingFile = value;
+						await this.plugin.saveSettings();
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName('Reading view bar chart')
+			.setDesc(
+				'Show a small rendered bar next to each timed item, sized relative to the slowest item, when the output note is viewed in Reading view. Reading view only — it does not appear in Live Preview or Source mode.',
+			)
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.showReadingViewBarChart)
+					.onChange(async (value) => {
+						this.plugin.settings.showReadingViewBarChart = value;
 						await this.plugin.saveSettings();
 					}),
 			);
