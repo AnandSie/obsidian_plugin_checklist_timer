@@ -94,6 +94,14 @@ export class ChecklistTimerSettingTab extends PluginSettingTab {
 					},
 				},
 			},
+			{
+				name: 'Overwrite existing file',
+				desc: 'If the output file already exists, replace its contents entirely instead of showing an error. Off by default to avoid accidentally discarding an existing file.',
+				control: {
+					type: 'toggle',
+					key: 'overwriteExistingFile',
+				},
+			},
 		];
 	}
 
@@ -129,6 +137,9 @@ export class ChecklistTimerSettingTab extends PluginSettingTab {
 				break;
 			case 'activeTaskTimerFormat':
 				this.plugin.settings.activeTaskTimerFormat = value as TimeFormat;
+				break;
+			case 'overwriteExistingFile':
+				this.plugin.settings.overwriteExistingFile = value as boolean;
 				break;
 		}
 		return this.plugin.saveSettings();
@@ -248,6 +259,20 @@ export class ChecklistTimerSettingTab extends PluginSettingTab {
 					.setValue(this.plugin.settings.activeTaskTimerFormat)
 					.onChange(async (value) => {
 						this.plugin.settings.activeTaskTimerFormat = value as TimeFormat;
+						await this.plugin.saveSettings();
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName('Overwrite existing file')
+			.setDesc(
+				'If the output file already exists, replace its contents entirely instead of showing an error. Off by default to avoid accidentally discarding an existing file.',
+			)
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.overwriteExistingFile)
+					.onChange(async (value) => {
+						this.plugin.settings.overwriteExistingFile = value;
 						await this.plugin.saveSettings();
 					}),
 			);

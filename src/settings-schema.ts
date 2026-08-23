@@ -32,6 +32,11 @@ export interface ChecklistTimerSettings {
 	showActiveTaskTimer: boolean;
 	// Time format for the status bar elapsed time (see utils/format.ts).
 	activeTaskTimerFormat: TimeFormat;
+	// When true, an output file that already exists at the resolved path is
+	// fully replaced (old content discarded) instead of erroring. Default off
+	// — silently discarding a file's contents is a data-loss risk, so it's an
+	// opt-in convenience rather than the default.
+	overwriteExistingFile: boolean;
 }
 
 export const DEFAULT_SETTINGS: ChecklistTimerSettings = {
@@ -43,4 +48,5 @@ export const DEFAULT_SETTINGS: ChecklistTimerSettings = {
 	resetOnCompletion: true,
 	showActiveTaskTimer: true,
 	activeTaskTimerFormat: 'mm:ss',
+	overwriteExistingFile: false,
 };

@@ -267,7 +267,20 @@ export class SessionManager {
 					}
 				}
 				const header = `# Checklist timing — ${session.title}\n\n`;
-				session.outputFile = await this.vault.create(session.outputPath, header + line);
+				const existing = this.settings.overwriteExistingFile
+					? (this.vault.getAbstractFileByPath(session.outputPath) as TFile | null)
+					: null;
+				if (existing) {
+					// Fully replace — the mutate callback ignores `current` rather than
+					// appending to it, so any prior content is discarded. Still routed
+					// through writeNoteContent (not a raw vault.modify) so a same-path
+					// note already open in an editor is overwritten there too,
+					// consistent with every other write path — see CLAUDE.md.
+					await this.writeNoteContent(existing, () => header + line);
+					session.outputFile = existing;
+				} else {
+					session.outputFile = await this.vault.create(session.outputPath, header + line);
+				}
 			} else {
 				await this.writeNoteContent(session.outputFile, (current) => current + line);
 			}

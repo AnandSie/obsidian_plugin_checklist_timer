@@ -755,6 +755,116 @@ describe('SessionManager — start item is also the block’s last item', () => 
 	});
 });
 
+describe('SessionManager — overwrite existing file setting', () => {
+	let vault: FakeVault;
+	let clock: FakeClock;
+
+	beforeEach(() => {
+		vault = new FakeVault();
+		clock = new FakeClock();
+	});
+
+	it('off (default): fails to write and reports the existing "already exists" error', async () => {
+		const { manager, notices } = makeManager(vault, clock, {
+			filenameTemplate: '{{title}} timing',
+		});
+		const file = sourceFile('Week Plan.md');
+
+		vault.files.set('Week Plan timing.md', 'pre-existing content');
+
+		await manager.handleFileContent(file, '#timed\n- [ ] Start\n- [ ] Two\n');
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [ ] Two\n');
+		clock.advance(1_000);
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n');
+
+		assert.equal(
+			vault.files.get('Week Plan timing.md'),
+			'pre-existing content',
+			'the pre-existing file must be left untouched',
+		);
+		assert.ok(
+			notices.some((n) => n.includes('failed to write to') && n.includes('already exists')),
+			'the existing "file already exists" error notice must still fire',
+		);
+	});
+
+	it('on: fully replaces the existing file’s content rather than appending or erroring', async () => {
+		const { manager, notices } = makeManager(vault, clock, {
+			overwriteExistingFile: true,
+			filenameTemplate: '{{title}} timing',
+		});
+		const file = sourceFile('Week Plan.md');
+
+		vault.files.set('Week Plan timing.md', 'stale content that must be discarded');
+
+		await manager.handleFileContent(file, '#timed\n- [ ] Start\n- [ ] Two\n');
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [ ] Two\n');
+		clock.advance(1_000);
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n');
+
+		const content = vault.files.get('Week Plan timing.md');
+		assert.ok(
+			!content?.includes('stale content'),
+			'old content must be completely discarded, not merged or appended to',
+		);
+		assert.equal(
+			content,
+			'# Checklist timing — Week Plan\n\n' +
+				'- Two: 00:00:01\n' +
+				'\nTotal: 00:00:01\n\n' +
+				'## Sorted by duration (slowest first)\n\n' +
+				'- Two: 00:00:01\n',
+		);
+		assert.ok(
+			!notices.some((n) => n.includes('already exists')),
+			'overwriting must complete normally, as if the file never existed',
+		);
+	});
+
+	it('on: writes through an open editor instead of vault.modify when the existing file is open in a pane', async () => {
+		const editorAccess = new FakeEditorAccess();
+		const { manager } = makeManager(
+			vault,
+			clock,
+			{ overwriteExistingFile: true, filenameTemplate: '{{title}} timing' },
+			undefined,
+			editorAccess,
+		);
+		const file = sourceFile('Week Plan.md');
+
+		vault.files.set('Week Plan timing.md', 'stale content');
+		const outputEditor = editorAccess.open('Week Plan timing.md', 'stale content');
+
+		await manager.handleFileContent(file, '#timed\n- [ ] Start\n- [ ] Two\n');
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [ ] Two\n');
+		clock.advance(1_000);
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n');
+
+		assert.ok(
+			outputEditor.getValue().includes('Two: 00:00:01') &&
+				!outputEditor.getValue().includes('stale content'),
+			'the live editor buffer should be fully replaced',
+		);
+		assert.equal(
+			vault.files.get('Week Plan timing.md'),
+			'stale content',
+			'vault.modify must not have been used while the note is open in an editor',
+		);
+	});
+
+	it('off: does not affect a session whose output file does not yet exist', async () => {
+		const { manager } = makeManager(vault, clock);
+		const file = sourceFile('Week Plan.md');
+
+		await manager.handleFileContent(file, '#timed\n- [ ] Start\n- [ ] Two\n');
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [ ] Two\n');
+		clock.advance(1_000);
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n');
+
+		assert.ok(vault.findContent('Week Plan timing')?.includes('Two: 00:00:01'));
+	});
+});
+
 describe('SessionManager — output path normalization', () => {
 	it('runs the configured output folder and final path through normalizePath', async () => {
 		const vault = new FakeVault();
