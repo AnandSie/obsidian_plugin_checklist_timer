@@ -12,7 +12,7 @@ import {
 	ChecklistTimerSettingTab,
 } from './settings';
 import { SessionManager } from './session-manager';
-import { EditorAccess, OpenEditor } from './timer-port';
+import { EditorAccess, OpenEditor, VaultAccess } from './timer-port';
 import { formatElapsed, truncateTaskName } from './utils/format';
 
 // Status bar tick cadence. formatElapsed only changes visibly every minute
@@ -41,7 +41,7 @@ export default class ChecklistTimerPlugin extends Plugin {
 		this.statusBarItemEl.hide();
 
 		this.sessionManager = new SessionManager(
-			this.app.vault,
+			this.vaultAccess(),
 			this.settings,
 			() => this.updateActiveTaskStatusBar(),
 			(message, options) => {
@@ -108,6 +108,26 @@ export default class ChecklistTimerPlugin extends Plugin {
 
 	private resolveFile(info: MarkdownView | MarkdownFileInfo): TFile | null {
 		return info.file ?? null;
+	}
+
+	// Wraps the real Vault so SessionManager gets a proper TFile-or-null from
+	// getExistingFile — real Obsidian's getAbstractFileByPath can return a
+	// TFolder, and `instanceof TFile` (only usable here, where the real
+	// Obsidian module is actually loaded — see the VaultAccess doc comment in
+	// timer-port.ts) is what tells the two apart.
+	private vaultAccess(): VaultAccess {
+		const vault = this.app.vault;
+		return {
+			getAbstractFileByPath: (path) => vault.getAbstractFileByPath(path),
+			getExistingFile: (path) => {
+				const file = vault.getAbstractFileByPath(path);
+				return file instanceof TFile ? file : null;
+			},
+			createFolder: (path) => vault.createFolder(path),
+			create: (path, content) => vault.create(path, content),
+			read: (file) => vault.read(file),
+			modify: (file, content) => vault.modify(file, content),
+		};
 	}
 
 	// Finds a live editor for `path` across every open pane (not just the

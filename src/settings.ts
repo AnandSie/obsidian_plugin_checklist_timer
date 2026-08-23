@@ -96,7 +96,7 @@ export class ChecklistTimerSettingTab extends PluginSettingTab {
 			},
 			{
 				name: 'Overwrite existing file',
-				desc: 'If the output file already exists, replace its contents entirely instead of showing an error. Off by default to avoid accidentally discarding an existing file.',
+				desc: 'If a file already exists at the output path — any file, not just one this plugin previously wrote — replace its contents entirely instead of showing an error. Off by default to avoid accidentally discarding an existing file.',
 				control: {
 					type: 'toggle',
 					key: 'overwriteExistingFile',
@@ -266,7 +266,7 @@ export class ChecklistTimerSettingTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName('Overwrite existing file')
 			.setDesc(
-				'If the output file already exists, replace its contents entirely instead of showing an error. Off by default to avoid accidentally discarding an existing file.',
+				'If a file already exists at the output path — any file, not just one this plugin previously wrote — replace its contents entirely instead of showing an error. Off by default to avoid accidentally discarding an existing file.',
 			)
 			.addToggle((toggle) =>
 				toggle

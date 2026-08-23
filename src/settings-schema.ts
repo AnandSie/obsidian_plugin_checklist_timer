@@ -32,10 +32,13 @@ export interface ChecklistTimerSettings {
 	showActiveTaskTimer: boolean;
 	// Time format for the status bar elapsed time (see utils/format.ts).
 	activeTaskTimerFormat: TimeFormat;
-	// When true, an output file that already exists at the resolved path is
-	// fully replaced (old content discarded) instead of erroring. Default off
-	// — silently discarding a file's contents is a data-loss risk, so it's an
-	// opt-in convenience rather than the default.
+	// When true, whatever file already exists at the resolved output path —
+	// not necessarily one this plugin wrote — is fully replaced (old content
+	// discarded) instead of erroring. outputFolder/filenameTemplate are both
+	// user-configurable, so this can collide with an unrelated, manually
+	// authored note of the same name. Default off — silently discarding a
+	// file's contents is a data-loss risk, so it's an opt-in convenience
+	// rather than the default.
 	overwriteExistingFile: boolean;
 }
 

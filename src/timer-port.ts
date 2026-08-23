@@ -5,6 +5,14 @@ import type { TFile } from 'obsidian';
 // `obsidian` npm package is types-only and has no runtime implementation.
 export interface VaultAccess {
 	getAbstractFileByPath(path: string): unknown;
+	// Like getAbstractFileByPath, but returns null unless the path is a real
+	// note (TFile) — never a folder mistyped as one. Real Obsidian's
+	// getAbstractFileByPath can return a TFolder, and the correct guard is
+	// `instanceof TFile`; session-manager.ts can't do that check itself since
+	// the `obsidian` npm package is types-only (no runtime `TFile` class to
+	// check against outside a real Obsidian host — see FakeVault in
+	// session-manager.test.ts), so this is a port, same as EditorAccess below.
+	getExistingFile(path: string): TFile | null;
 	createFolder(path: string): Promise<unknown>;
 	create(path: string, content: string): Promise<TFile>;
 	read(file: TFile): Promise<string>;
