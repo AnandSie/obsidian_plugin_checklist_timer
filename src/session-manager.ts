@@ -1,8 +1,8 @@
 import type { TFile } from 'obsidian';
-import { ChecklistBlock, findTimedBlocks, resolveStartIndex } from './utils/checklist';
+import { ChecklistBlock, findTimedBlocks, resolveStartIndex, uncheckBlock } from './utils/checklist';
 import { formatDuration, renderFilename } from './utils/format';
 import { ChecklistTimerSettings } from './settings-schema';
-import { Notifier, NotifyOptions, VaultAccess } from './timer-port';
+import { EditorAccess, Notifier, NotifyOptions, VaultAccess } from './timer-port';
 
 // Obsidian's default notice timeout is short (~5s); the finish notice is a
 // clickable CTA to open the result note, so give the user more time to
@@ -49,6 +49,9 @@ export class SessionManager {
 		// Obsidian's normalizePath() — cleans user-typed folder paths (stray
 		// slashes, platform separators, etc.) before they hit the filesystem.
 		private readonly normalizePath: (path: string) => string = (path) => path,
+		// Defaults to "nothing is open in an editor" so existing call sites
+		// (and tests that don't care about this) don't need to supply one.
+		private readonly editorAccess: EditorAccess = { getOpenEditor: () => null },
 	) {}
 
 	updateSettings(settings: ChecklistTimerSettings) {
@@ -155,7 +158,7 @@ export class SessionManager {
 		}
 
 		if (index === block.items.length - 1) {
-			await this.finishSession('completed');
+			await this.finishSession('completed', file, block);
 		}
 	}
 
@@ -214,7 +217,7 @@ export class SessionManager {
 				const header = `# Checklist timing — ${session.title}\n\n`;
 				session.outputFile = await this.vault.create(session.outputPath, header + line);
 			} else {
-				await this.vault.append(session.outputFile, line);
+				await this.writeNoteContent(session.outputFile, (current) => current + line);
 			}
 			return true;
 		} catch (err) {
@@ -226,7 +229,11 @@ export class SessionManager {
 		}
 	}
 
-	private async finishSession(reason: 'completed' | 'stopped') {
+	private async finishSession(
+		reason: 'completed' | 'stopped',
+		sourceFile?: TFile,
+		sourceBlock?: ChecklistBlock,
+	) {
 		const session = this.activeSession;
 		if (!session) return;
 		this.activeSession = null;
@@ -248,7 +255,7 @@ export class SessionManager {
 			`\nTotal: ${formatDuration(totalMs)}${suffix}\n\n` +
 			`## Sorted by duration (slowest first)\n\n${slowestFirstLines}\n`;
 		try {
-			await this.vault.append(outputFile, footer);
+			await this.writeNoteContent(outputFile, (current) => current + footer);
 			this.notify(
 				`✅ "${session.title}" finished in ${formatDuration(totalMs)}${suffix} — click to open results`,
 				{ filePath: outputFile.path, durationMs: FINISH_NOTICE_DURATION_MS },
@@ -259,6 +266,38 @@ export class SessionManager {
 				{ filePath: outputFile.path },
 			);
 		}
+
+		// Only a natural finish (last item checked) resets the checklist — a
+		// manual stop means the run was intentionally left incomplete, so the
+		// checklist is left as-is rather than blanking out real progress.
+		if (reason === 'completed' && this.settings.resetOnCompletion && sourceFile && sourceBlock) {
+			await this.resetChecklistBlock(sourceFile, sourceBlock);
+		}
+	}
+
+	private async resetChecklistBlock(file: TFile, block: ChecklistBlock) {
+		try {
+			await this.writeNoteContent(file, (current) => uncheckBlock(current, block));
+		} catch (err) {
+			this.notify(`Checklist timer: failed to reset checklist in ${file.path} (${String(err)})`);
+		}
+	}
+
+	// Shared write path for both the output note (appendItem/finishSession)
+	// and resetting the source checklist. When the target note is open in an
+	// editor, mutate *that* buffer directly instead of writing to disk out
+	// from under it — see the EditorAccess doc comment in timer-port.ts for
+	// why a raw vault.modify() is unsafe in that case. Always reads the
+	// live/current content (from the editor, or fresh off disk) rather than a
+	// stale snapshot, so callers never need to thread content through.
+	private async writeNoteContent(file: TFile, mutate: (current: string) => string): Promise<void> {
+		const editor = this.editorAccess.getOpenEditor(file.path);
+		if (editor) {
+			editor.setValue(mutate(editor.getValue()));
+			return;
+		}
+		const current = await this.vault.read(file);
+		await this.vault.modify(file, mutate(current));
 	}
 
 	// Only worth attaching a click-to-open target once the output file

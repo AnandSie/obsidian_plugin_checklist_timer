@@ -7,7 +7,28 @@ export interface VaultAccess {
 	getAbstractFileByPath(path: string): unknown;
 	createFolder(path: string): Promise<unknown>;
 	create(path: string, content: string): Promise<TFile>;
-	append(file: TFile, content: string): Promise<void>;
+	read(file: TFile): Promise<string>;
+	modify(file: TFile, content: string): Promise<void>;
+}
+
+// The narrow slice of Obsidian's Workspace that SessionManager needs to write
+// safely into a note that might already be open in a live editor. When a
+// pane has the target note open, writing through *that* editor keeps it as
+// the single source of truth; writing straight to disk instead (vault.modify)
+// risks the editor's own — possibly stale — buffer being saved back
+// afterwards and silently clobbering the write. See CLAUDE.md "Known
+// issues" for the concrete failure mode this exists to avoid.
+export interface EditorAccess {
+	// Returns a handle for the editor currently displaying `path` in some
+	// pane, or null if the note isn't open anywhere.
+	getOpenEditor(path: string): OpenEditor | null;
+}
+
+// Matches the subset of Obsidian's real `Editor` that writeNoteContent
+// needs — Obsidian's Editor already satisfies this structurally.
+export interface OpenEditor {
+	getValue(): string;
+	setValue(value: string): void;
 }
 
 export interface NotifyOptions {

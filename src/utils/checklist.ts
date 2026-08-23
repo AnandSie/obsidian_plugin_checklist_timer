@@ -74,3 +74,16 @@ export function resolveStartIndex(
 	const tagged = block.items.findIndex((item) => item.text.toLowerCase().includes(needle));
 	return tagged === -1 ? 0 : tagged;
 }
+
+// Unchecks every item in the block, leaving the rest of the note untouched —
+// used to reset a recurring checklist (e.g. a weekly review template) back to
+// blank once its timed session finishes. See resetOnCompletion setting.
+export function uncheckBlock(content: string, block: ChecklistBlock): string {
+	const lines = content.split('\n');
+	for (const item of block.items) {
+		const line = lines[item.line];
+		if (line === undefined) continue;
+		lines[item.line] = line.replace(/^(-\s\[)[xX](\])/, '$1 $2');
+	}
+	return lines.join('\n');
+}

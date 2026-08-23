@@ -12,6 +12,7 @@ import {
 	ChecklistTimerSettingTab,
 } from './settings';
 import { SessionManager } from './session-manager';
+import { EditorAccess, OpenEditor } from './timer-port';
 
 export default class ChecklistTimerPlugin extends Plugin {
 	settings!: ChecklistTimerSettings;
@@ -43,6 +44,7 @@ export default class ChecklistTimerPlugin extends Plugin {
 			},
 			Date.now,
 			normalizePath,
+			this.editorAccess(),
 		);
 
 		this.addRibbonIcon('timer', 'Stop checklist timer', () => {
@@ -88,6 +90,25 @@ export default class ChecklistTimerPlugin extends Plugin {
 
 	private resolveFile(info: MarkdownView | MarkdownFileInfo): TFile | null {
 		return info.file ?? null;
+	}
+
+	// Finds a live editor for `path` across every open pane (not just the
+	// active one), so SessionManager can write through it instead of
+	// straight to disk — see the EditorAccess doc comment in timer-port.ts.
+	private editorAccess(): EditorAccess {
+		return {
+			getOpenEditor: (path: string): OpenEditor | null => {
+				let found: OpenEditor | null = null;
+				this.app.workspace.iterateAllLeaves((leaf) => {
+					if (found) return;
+					const view = leaf.view;
+					if (view instanceof MarkdownView && view.file?.path === path) {
+						found = view.editor;
+					}
+				});
+				return found;
+			},
+		};
 	}
 
 	async loadSettings() {
