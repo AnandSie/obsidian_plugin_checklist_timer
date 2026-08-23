@@ -204,7 +204,7 @@ export class SessionManager {
 
 		const wrote = await this.appendItem(session, item.text, duration);
 		if (wrote) {
-			this.notify(`⏱ ${item.text}: ${formatDuration(duration)}`, this.resultFileOptions(session));
+			this.notify(`⏱ ${formatDuration(duration)} - ${item.text}`, this.resultFileOptions(session));
 		}
 
 		if (index === block.items.length - 1) {

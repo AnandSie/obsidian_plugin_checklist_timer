@@ -298,7 +298,7 @@ describe('SessionManager — basic sequential timing', () => {
 		// First item creates the file successfully...
 		clock.advance(1_000);
 		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n- [ ] Three\n');
-		assert.ok(notices.some((n) => n.includes('⏱ Two:')));
+		assert.ok(notices.some((n) => n.includes('⏱ 00:00:01 - Two')));
 
 		// ...but the write for the second item fails.
 		vault.failNextModify = true;
@@ -310,7 +310,7 @@ describe('SessionManager — basic sequential timing', () => {
 			'the failure must be reported',
 		);
 		assert.ok(
-			!notices.some((n) => n.includes('⏱ Three:')),
+			!notices.some((n) => n.includes('⏱ 00:00:01 - Three')),
 			'no success-looking notice should fire for an item that was never actually saved',
 		);
 	});
