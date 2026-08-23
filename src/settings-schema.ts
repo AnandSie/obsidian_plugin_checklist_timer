@@ -19,6 +19,12 @@ export interface ChecklistTimerSettings {
 	outputFolder: string;
 	// Supports {{date}} and {{title}} placeholders.
 	filenameTemplate: string;
+	// When true (default), a session that finishes naturally (its last item
+	// gets checked) also unchecks every item in the checklist, so a recurring
+	// process (e.g. a weekly review template) is ready to run again next time
+	// without manual cleanup. Does not apply to a manual stop — an
+	// intentionally incomplete run leaves the checklist as-is.
+	resetOnCompletion: boolean;
 }
 
 export const DEFAULT_SETTINGS: ChecklistTimerSettings = {
@@ -27,4 +33,5 @@ export const DEFAULT_SETTINGS: ChecklistTimerSettings = {
 	autoSwitchSessions: true,
 	outputFolder: '',
 	filenameTemplate: '{{date}} {{title}} timing',
+	resetOnCompletion: true,
 };

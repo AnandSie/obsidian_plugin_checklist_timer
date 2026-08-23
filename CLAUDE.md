@@ -67,6 +67,14 @@ mechanism should feel familiar rather than inventing something new.
   while blocked, not just the first, so this can't fail silently.
 - A session ends either when the last item in the checklist is checked, or via
   a manual stop action in the UI.
+- When a session ends by reaching the **last item** (not a manual stop), every
+  item in the block is automatically unchecked again — a `resetOnCompletion`
+  setting, **default on** — so a recurring checklist (e.g. a weekly review
+  template) is immediately ready to run again next time without manual
+  cleanup. This includes any pre-start items, so the checklist reads as fully
+  blank. A manual stop deliberately does *not* trigger this, since stopping
+  early means the run was left incomplete on purpose — blanking it out would
+  destroy real progress rather than reset a finished cycle.
 - Because the start item is unambiguous (tagged, or first-by-default), there's
   no "checked an item without starting" edge case to handle in v1.
 - Nested/indented checklist items (parent items that would need their own

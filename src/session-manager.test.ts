@@ -11,8 +11,14 @@ import type { NotifyOptions, VaultAccess } from './timer-port';
 class FakeVault implements VaultAccess {
 	files = new Map<string, string>();
 	folders = new Set<string>();
+	// Separate from `files` (which models the created/appended output note) —
+	// tracks writes back to a *source* checklist note, e.g. the reset feature
+	// unchecking its items. Keyed by path.
+	modified = new Map<string, string>();
 	// Test hook: makes the next append() call reject, to exercise write-failure paths.
 	failNextAppend = false;
+	// Test hook: makes the next modify() call reject, to exercise reset-failure paths.
+	failNextModify = false;
 
 	getAbstractFileByPath(path: string): unknown {
 		if (this.files.has(path) || this.folders.has(path)) return { path };
@@ -39,6 +45,15 @@ class FakeVault implements VaultAccess {
 		const existing = this.files.get(path);
 		if (existing === undefined) throw new Error(`append to missing file: ${path}`);
 		this.files.set(path, existing + content);
+	}
+
+	async modify(file: TFile, content: string): Promise<void> {
+		if (this.failNextModify) {
+			this.failNextModify = false;
+			throw new Error('simulated disk error');
+		}
+		const path = (file as unknown as { path: string }).path;
+		this.modified.set(path, content);
 	}
 
 	// Test helper: find the single stored file whose path contains `needle`.
@@ -380,6 +395,78 @@ describe('SessionManager — two checklists started while one is running', () =>
 		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n');
 		const content = vault.findContent('Note timing');
 		assert.ok(content?.includes('Two: 00:00:01'), 'the original session must still be intact');
+	});
+});
+
+describe('SessionManager — reset checklist on completion', () => {
+	let vault: FakeVault;
+	let clock: FakeClock;
+
+	beforeEach(() => {
+		vault = new FakeVault();
+		clock = new FakeClock();
+	});
+
+	it('unchecks every item (including pre-start ones) once the session finishes naturally', async () => {
+		const { manager } = makeManager(vault, clock);
+		const file = sourceFile('Week Plan.md');
+
+		const content = '#timed\n- [x] Prep\n- [ ] #start Kickoff\n- [ ] Two\n';
+		await manager.handleFileContent(file, content);
+		await manager.handleFileContent(
+			file,
+			'#timed\n- [x] Prep\n- [x] #start Kickoff\n- [ ] Two\n',
+		);
+		clock.advance(1_000);
+		await manager.handleFileContent(
+			file,
+			'#timed\n- [x] Prep\n- [x] #start Kickoff\n- [x] Two\n',
+		);
+
+		assert.equal(
+			vault.modified.get('Week Plan.md'),
+			'#timed\n- [ ] Prep\n- [ ] #start Kickoff\n- [ ] Two\n',
+			'the source note should have every box in the block unchecked, pre-start items included',
+		);
+	});
+
+	it('does not reset when the session is stopped early', async () => {
+		const { manager } = makeManager(vault, clock);
+		const file = sourceFile('Week Plan.md');
+
+		await manager.handleFileContent(file, '#timed\n- [ ] Start\n- [ ] Two\n- [ ] Three\n');
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [ ] Two\n- [ ] Three\n');
+		clock.advance(1_000);
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n- [ ] Three\n');
+
+		await manager.stopActiveSession();
+
+		assert.equal(vault.modified.size, 0, 'stopping early must leave the checklist untouched');
+	});
+
+	it('leaves the checklist alone when the setting is off', async () => {
+		const { manager } = makeManager(vault, clock, { resetOnCompletion: false });
+		const file = sourceFile('Week Plan.md');
+
+		await manager.handleFileContent(file, '#timed\n- [ ] Start\n- [ ] Two\n');
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [ ] Two\n');
+		clock.advance(1_000);
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n');
+
+		assert.equal(vault.modified.size, 0);
+	});
+
+	it('reports a failure to reset without throwing', async () => {
+		const { manager, notices } = makeManager(vault, clock);
+		const file = sourceFile('Week Plan.md');
+
+		await manager.handleFileContent(file, '#timed\n- [ ] Start\n- [ ] Two\n');
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [ ] Two\n');
+		clock.advance(1_000);
+		vault.failNextModify = true;
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n');
+
+		assert.ok(notices.some((n) => n.includes('failed to reset checklist in Week Plan.md')));
 	});
 });
 

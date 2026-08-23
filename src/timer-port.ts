@@ -8,6 +8,7 @@ export interface VaultAccess {
 	createFolder(path: string): Promise<unknown>;
 	create(path: string, content: string): Promise<TFile>;
 	append(file: TFile, content: string): Promise<void>;
+	modify(file: TFile, content: string): Promise<void>;
 }
 
 export interface NotifyOptions {

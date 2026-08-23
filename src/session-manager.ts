@@ -1,5 +1,5 @@
 import type { TFile } from 'obsidian';
-import { ChecklistBlock, findTimedBlocks, resolveStartIndex } from './utils/checklist';
+import { ChecklistBlock, findTimedBlocks, resolveStartIndex, uncheckBlock } from './utils/checklist';
 import { formatDuration, renderFilename } from './utils/format';
 import { ChecklistTimerSettings } from './settings-schema';
 import { Notifier, NotifyOptions, VaultAccess } from './timer-port';
@@ -62,7 +62,7 @@ export class SessionManager {
 	async handleFileContent(file: TFile, content: string) {
 		const blocks = findTimedBlocks(content, this.settings.timedTag);
 		for (const block of blocks) {
-			await this.processBlock(file, block);
+			await this.processBlock(file, block, content);
 		}
 	}
 
@@ -70,7 +70,7 @@ export class SessionManager {
 		return `${file.path}#${block.startLine}`;
 	}
 
-	private async processBlock(file: TFile, block: ChecklistBlock) {
+	private async processBlock(file: TFile, block: ChecklistBlock, content: string) {
 		const key = this.blockKey(file, block);
 		const currentState = block.items.map((item) => item.checked);
 		const previousState = this.blockStateCache.get(key);
@@ -87,7 +87,7 @@ export class SessionManager {
 
 		const startIndex = resolveStartIndex(block, this.settings.startTag);
 		for (const index of newlyChecked) {
-			await this.handleItemChecked(file, block, index, startIndex);
+			await this.handleItemChecked(file, block, index, startIndex, content);
 		}
 	}
 
@@ -96,6 +96,7 @@ export class SessionManager {
 		block: ChecklistBlock,
 		index: number,
 		startIndex: number,
+		content: string,
 	) {
 		if (index < startIndex) return;
 
@@ -155,7 +156,7 @@ export class SessionManager {
 		}
 
 		if (index === block.items.length - 1) {
-			await this.finishSession('completed');
+			await this.finishSession('completed', file, block, content);
 		}
 	}
 
@@ -226,7 +227,12 @@ export class SessionManager {
 		}
 	}
 
-	private async finishSession(reason: 'completed' | 'stopped') {
+	private async finishSession(
+		reason: 'completed' | 'stopped',
+		sourceFile?: TFile,
+		sourceBlock?: ChecklistBlock,
+		sourceContent?: string,
+	) {
 		const session = this.activeSession;
 		if (!session) return;
 		this.activeSession = null;
@@ -258,6 +264,27 @@ export class SessionManager {
 				`Checklist timer: failed to write total to ${session.outputPath} (${String(err)})`,
 				{ filePath: outputFile.path },
 			);
+		}
+
+		// Only a natural finish (last item checked) resets the checklist — a
+		// manual stop means the run was intentionally left incomplete, so the
+		// checklist is left as-is rather than blanking out real progress.
+		if (
+			reason === 'completed' &&
+			this.settings.resetOnCompletion &&
+			sourceFile &&
+			sourceBlock &&
+			sourceContent !== undefined
+		) {
+			await this.resetChecklistBlock(sourceFile, sourceBlock, sourceContent);
+		}
+	}
+
+	private async resetChecklistBlock(file: TFile, block: ChecklistBlock, content: string) {
+		try {
+			await this.vault.modify(file, uncheckBlock(content, block));
+		} catch (err) {
+			this.notify(`Checklist timer: failed to reset checklist in ${file.path} (${String(err)})`);
 		}
 	}
 

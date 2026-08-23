@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseChecklistBlocks, findTimedBlocks, resolveStartIndex } from './checklist';
+import { parseChecklistBlocks, findTimedBlocks, resolveStartIndex, uncheckBlock } from './checklist';
 
 describe('parseChecklistBlocks', () => {
 	it('groups contiguous top-level checkbox lines into a block', () => {
@@ -111,5 +111,26 @@ describe('resolveStartIndex', () => {
 		const block = findTimedBlocks(content, '#timed')[0];
 		assert.ok(block);
 		assert.equal(resolveStartIndex(block, '#start'), 1);
+	});
+});
+
+describe('uncheckBlock', () => {
+	it('unchecks every item in the block, uppercase X included, leaving surrounding text untouched', () => {
+		const content = '# Heading\n\n#timed\n- [x] One\n- [X] Two\n- [ ] Three\n\nafter\n';
+		const block = findTimedBlocks(content, '#timed')[0];
+		assert.ok(block);
+
+		assert.equal(
+			uncheckBlock(content, block),
+			'# Heading\n\n#timed\n- [ ] One\n- [ ] Two\n- [ ] Three\n\nafter\n',
+		);
+	});
+
+	it('preserves each item’s text exactly', () => {
+		const content = '#timed\n- [x] Buy milk #groceries\n';
+		const block = findTimedBlocks(content, '#timed')[0];
+		assert.ok(block);
+
+		assert.equal(uncheckBlock(content, block), '#timed\n- [ ] Buy milk #groceries\n');
 	});
 });

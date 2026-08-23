@@ -64,6 +64,14 @@ export class ChecklistTimerSettingTab extends PluginSettingTab {
 					placeholder: '{{date}} {{title}} timing',
 				},
 			},
+			{
+				name: 'Reset checklist when finished',
+				desc: 'When a timed checklist is completed (its last item checked), automatically uncheck every item so it’s ready to run again next time — handy for recurring processes like a weekly review. Does not apply when a session is stopped early.',
+				control: {
+					type: 'toggle',
+					key: 'resetOnCompletion',
+				},
+			},
 		];
 	}
 
@@ -90,6 +98,9 @@ export class ChecklistTimerSettingTab extends PluginSettingTab {
 			case 'filenameTemplate':
 				this.plugin.settings.filenameTemplate =
 					(value as string).trim() || DEFAULT_SETTINGS.filenameTemplate;
+				break;
+			case 'resetOnCompletion':
+				this.plugin.settings.resetOnCompletion = value as boolean;
 				break;
 		}
 		return this.plugin.saveSettings();
@@ -168,6 +179,20 @@ export class ChecklistTimerSettingTab extends PluginSettingTab {
 					.onChange(async (value) => {
 						this.plugin.settings.filenameTemplate =
 							value.trim() || '{{date}} {{title}} timing';
+						await this.plugin.saveSettings();
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName('Reset checklist when finished')
+			.setDesc(
+				'When a timed checklist is completed (its last item checked), automatically uncheck every item so it’s ready to run again next time — handy for recurring processes like a weekly review. Does not apply when a session is stopped early.',
+			)
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.resetOnCompletion)
+					.onChange(async (value) => {
+						this.plugin.settings.resetOnCompletion = value;
 						await this.plugin.saveSettings();
 					}),
 			);
