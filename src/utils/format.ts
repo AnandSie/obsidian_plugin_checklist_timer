@@ -1,9 +1,22 @@
+const pad = (n: number) => n.toString().padStart(2, '0');
+
+// Shared by formatDuration and formatElapsed's 'hh:mm:ss' case so the
+// hour/minute/second breakdown lives in exactly one place.
+function decomposeSeconds(totalSeconds: number): {
+	hours: number;
+	minutes: number;
+	seconds: number;
+} {
+	return {
+		hours: Math.floor(totalSeconds / 3600),
+		minutes: Math.floor((totalSeconds % 3600) / 60),
+		seconds: totalSeconds % 60,
+	};
+}
+
 export function formatDuration(ms: number): string {
 	const totalSeconds = Math.max(0, Math.round(ms / 1000));
-	const hours = Math.floor(totalSeconds / 3600);
-	const minutes = Math.floor((totalSeconds % 3600) / 60);
-	const seconds = totalSeconds % 60;
-	const pad = (n: number) => n.toString().padStart(2, '0');
+	const { hours, minutes, seconds } = decomposeSeconds(totalSeconds);
 	return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
 }
 
@@ -18,7 +31,6 @@ export type TimeFormat = 'mm:ss' | 'hh:mm' | 'hh:mm:ss';
 // past the format's usual range stays readable instead of misleading.
 export function formatElapsed(ms: number, format: TimeFormat): string {
 	const totalSeconds = Math.max(0, Math.floor(ms / 1000));
-	const pad = (n: number) => n.toString().padStart(2, '0');
 
 	switch (format) {
 		case 'hh:mm': {
@@ -28,9 +40,7 @@ export function formatElapsed(ms: number, format: TimeFormat): string {
 			return `${pad(hours)}:${pad(minutes)}`;
 		}
 		case 'hh:mm:ss': {
-			const hours = Math.floor(totalSeconds / 3600);
-			const minutes = Math.floor((totalSeconds % 3600) / 60);
-			const seconds = totalSeconds % 60;
+			const { hours, minutes, seconds } = decomposeSeconds(totalSeconds);
 			return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
 		}
 		case 'mm:ss':
@@ -45,13 +55,16 @@ export function formatElapsed(ms: number, format: TimeFormat): string {
 const TASK_NAME_MAX_LENGTH = 20;
 
 // Keeps the status bar item compact — a long checklist item shouldn't crowd
-// out the rest of Obsidian's status bar.
+// out the rest of Obsidian's status bar. Splits on Unicode code points (not
+// UTF-16 code units) via Array.from, so a surrogate pair (e.g. an emoji
+// outside the BMP) straddling the cut point is never torn in half.
 export function truncateTaskName(
 	name: string,
 	maxLength: number = TASK_NAME_MAX_LENGTH,
 ): string {
-	if (name.length <= maxLength) return name;
-	return `${name.slice(0, maxLength - 1)}…`;
+	const codePoints = Array.from(name);
+	if (codePoints.length <= maxLength) return name;
+	return `${codePoints.slice(0, maxLength - 1).join('')}…`;
 }
 
 export function renderFilename(template: string, title: string): string {

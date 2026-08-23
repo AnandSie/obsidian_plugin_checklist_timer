@@ -24,6 +24,10 @@ class FakeVault implements VaultAccess {
 	// lets a test target one write (e.g. the reset) when another modify()
 	// call (e.g. the finish footer) legitimately happens first in the same tick.
 	failModifyForPath: string | null = null;
+	// Test hook: when set, create()/modify() await this before proceeding —
+	// lets a test pause mid-write to inspect state during the await window
+	// (e.g. between the last item's check-off and finishSession completing).
+	gate: Promise<void> | null = null;
 
 	getAbstractFileByPath(path: string): unknown {
 		if (this.files.has(path) || this.folders.has(path)) return { path };
@@ -36,6 +40,7 @@ class FakeVault implements VaultAccess {
 	}
 
 	async create(path: string, content: string): Promise<TFile> {
+		if (this.gate) await this.gate;
 		if (this.files.has(path)) throw new Error(`already exists: ${path}`);
 		this.files.set(path, content);
 		return { path } as unknown as TFile;
@@ -49,6 +54,7 @@ class FakeVault implements VaultAccess {
 	}
 
 	async modify(file: TFile, content: string): Promise<void> {
+		if (this.gate) await this.gate;
 		const path = (file as unknown as { path: string }).path;
 		if (this.failNextModify || this.failModifyForPath === path) {
 			this.failNextModify = false;
@@ -365,6 +371,62 @@ describe('SessionManager — getActiveTask', () => {
 
 		assert.equal(manager.getActiveTask(), null);
 	});
+
+	it('reports the first still-unchecked item after start, not the positionally-next one, when items are checked out of order', async () => {
+		const { manager } = makeManager(vault, clock);
+		const file = sourceFile('Week Plan.md');
+
+		await manager.handleFileContent(
+			file,
+			'#timed\n- [ ] Start\n- [ ] Two\n- [ ] Three\n- [ ] Four\n- [ ] Five\n',
+		);
+		await manager.handleFileContent(
+			file,
+			'#timed\n- [x] Start\n- [ ] Two\n- [ ] Three\n- [ ] Four\n- [ ] Five\n',
+		);
+
+		// "Four" gets checked out of order (e.g. via a bulk edit, or another
+		// plugin's sidebar), skipping "Two" and "Three".
+		await manager.handleFileContent(
+			file,
+			'#timed\n- [x] Start\n- [ ] Two\n- [ ] Three\n- [x] Four\n- [ ] Five\n',
+		);
+
+		assert.equal(
+			manager.getActiveTask()?.name,
+			'Two',
+			'must report the first still-unchecked item, not "Five" (positionally after "Four")',
+		);
+	});
+
+	it('returns null as soon as the last item is checked, even before the async finish write completes', async () => {
+		const { manager } = makeManager(vault, clock);
+		const file = sourceFile('Week Plan.md');
+
+		await manager.handleFileContent(file, '#timed\n- [ ] Start\n- [ ] Two\n');
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [ ] Two\n');
+
+		let releaseGate!: () => void;
+		vault.gate = new Promise((resolve) => {
+			releaseGate = resolve;
+		});
+
+		const finishing = manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n');
+		// Flush already-queued microtasks without letting the gated vault write
+		// (creating the output note) resolve — this is the exact window between
+		// the last item's check-off and finishSession nulling the session.
+		await Promise.resolve();
+		await Promise.resolve();
+
+		assert.equal(
+			manager.getActiveTask(),
+			null,
+			'must not show a stale/misleading task while the finish write is still pending',
+		);
+
+		releaseGate();
+		await finishing;
+	});
 });
 
 describe('SessionManager — two checklists started while one is running', () => {
@@ -634,6 +696,62 @@ describe('SessionManager — reset checklist on completion', () => {
 		await tick(manager, file, '#timed\n- [x] Start\n- [x] Two\n');
 
 		assert.ok(notices.some((n) => n.includes('failed to reset checklist in Week Plan.md')));
+	});
+});
+
+describe('SessionManager — start item is also the block’s last item', () => {
+	let vault: FakeVault;
+	let clock: FakeClock;
+
+	beforeEach(() => {
+		vault = new FakeVault();
+		clock = new FakeClock();
+	});
+
+	it('finishes immediately instead of leaving the session running forever', async () => {
+		const { manager, notices } = makeManager(vault, clock);
+		const file = sourceFile('Quick Task.md');
+
+		await manager.handleFileContent(file, '#timed\n- [ ] Only step\n');
+		await manager.handleFileContent(file, '#timed\n- [x] Only step\n');
+
+		assert.equal(manager.hasActiveSession(), false, 'the session must not be left running');
+		assert.equal(manager.getActiveTask(), null);
+		assert.ok(notices.includes('▶️ "Quick Task" started'));
+		assert.ok(
+			notices.includes('Checklist timer: stopped (no items timed).'),
+			'zero items were timed — starting and ending on the same item',
+		);
+	});
+
+	it('also finishes immediately when the tagged start item is the last item in a multi-item block', async () => {
+		const { manager } = makeManager(vault, clock);
+		const file = sourceFile('Note.md');
+		const content = '#timed\n- [ ] Prep (not timed)\n- [ ] #start Last step\n';
+
+		await manager.handleFileContent(file, content);
+		await manager.handleFileContent(
+			file,
+			'#timed\n- [ ] Prep (not timed)\n- [x] #start Last step\n',
+		);
+
+		assert.equal(manager.hasActiveSession(), false);
+	});
+
+	it('still resets the checklist on this immediate finish when resetOnCompletion is on', async () => {
+		const { manager } = makeManager(vault, clock);
+		const file = sourceFile('Quick Task.md');
+
+		vault.disk.set(file.path, '#timed\n- [ ] Only step\n');
+		await manager.handleFileContent(file, '#timed\n- [ ] Only step\n');
+		vault.disk.set(file.path, '#timed\n- [x] Only step\n');
+		await manager.handleFileContent(file, '#timed\n- [x] Only step\n');
+
+		assert.equal(
+			vault.disk.get('Quick Task.md'),
+			'#timed\n- [ ] Only step\n',
+			'a completed run resets the checklist even when nothing was ever timed',
+		);
 	});
 });
 

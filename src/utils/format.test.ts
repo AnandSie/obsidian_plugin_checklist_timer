@@ -76,6 +76,16 @@ describe('truncateTaskName', () => {
 		const name = 'x'.repeat(20);
 		assert.equal(truncateTaskName(name, 20), name);
 	});
+
+	it('does not split a surrogate pair (e.g. an emoji) at the truncation boundary', () => {
+		// 18 ASCII chars then a non-BMP emoji (a UTF-16 surrogate pair) landing
+		// right at the cut point — a UTF-16-code-unit slice would chop the pair
+		// in half and leave a lone, unpaired surrogate in the result.
+		const name = `${'x'.repeat(18)}📅 rest of a very long checklist item name`;
+		const result = truncateTaskName(name, 20);
+		assert.ok(result.includes('📅'), 'the emoji must survive intact, not be split');
+		assert.equal(Array.from(result).length, 20, 'length is measured in code points, not UTF-16 units');
+	});
 });
 
 describe('renderFilename', () => {

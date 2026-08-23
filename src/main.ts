@@ -18,13 +18,18 @@ import { formatElapsed, truncateTaskName } from './utils/format';
 // Status bar tick cadence. formatElapsed only changes visibly every minute
 // for the 'hh:mm' format, but ticking every second regardless is simpler
 // than reconfiguring the interval whenever the format setting changes, and
-// costs nothing noticeable.
+// costs nothing noticeable per tick — the interval itself is only alive
+// while there's actually something to tick (see start/stopActiveTaskTicker).
 const ACTIVE_TASK_TICK_MS = 1_000;
 
 export default class ChecklistTimerPlugin extends Plugin {
 	settings!: ChecklistTimerSettings;
 	sessionManager!: SessionManager;
 	private statusBarItemEl!: HTMLElement;
+	// Not registerInterval()'d — its lifetime is shorter than the plugin's
+	// (started only while the status bar item is actually showing), so it's
+	// started/stopped by hand and swept up in onunload() instead.
+	private activeTaskIntervalId: number | null = null;
 
 	async onload() {
 		await this.loadSettings();
@@ -72,10 +77,6 @@ export default class ChecklistTimerPlugin extends Plugin {
 
 		this.addSettingTab(new ChecklistTimerSettingTab(this.app, this));
 
-		this.registerInterval(
-			window.setInterval(() => this.updateActiveTaskStatusBar(), ACTIVE_TASK_TICK_MS),
-		);
-
 		this.registerEvent(
 			this.app.workspace.on('editor-change', (editor, info) => {
 				const file = this.resolveFile(info);
@@ -101,7 +102,9 @@ export default class ChecklistTimerPlugin extends Plugin {
 		);
 	}
 
-	onunload() {}
+	onunload() {
+		this.stopActiveTaskTicker();
+	}
 
 	private resolveFile(info: MarkdownView | MarkdownFileInfo): TFile | null {
 		return info.file ?? null;
@@ -134,16 +137,36 @@ export default class ChecklistTimerPlugin extends Plugin {
 	private updateActiveTaskStatusBar() {
 		if (!this.settings.showActiveTaskTimer) {
 			this.statusBarItemEl.hide();
+			this.stopActiveTaskTicker();
 			return;
 		}
 		const task = this.sessionManager.getActiveTask();
 		if (!task) {
 			this.statusBarItemEl.hide();
+			this.stopActiveTaskTicker();
 			return;
 		}
 		const elapsed = formatElapsed(Date.now() - task.startTime, this.settings.activeTaskTimerFormat);
 		this.statusBarItemEl.setText(`⏱ ${truncateTaskName(task.name)}: ${elapsed}`);
 		this.statusBarItemEl.show();
+		this.startActiveTaskTicker();
+	}
+
+	// Only ticks while the status bar item actually has something to show —
+	// cheap per-tick, but no reason to run once a second for the plugin's
+	// entire lifetime when most of that time nothing is being timed.
+	private startActiveTaskTicker() {
+		if (this.activeTaskIntervalId !== null) return;
+		this.activeTaskIntervalId = window.setInterval(
+			() => this.updateActiveTaskStatusBar(),
+			ACTIVE_TASK_TICK_MS,
+		);
+	}
+
+	private stopActiveTaskTicker() {
+		if (this.activeTaskIntervalId === null) return;
+		window.clearInterval(this.activeTaskIntervalId);
+		this.activeTaskIntervalId = null;
 	}
 
 	async loadSettings() {
