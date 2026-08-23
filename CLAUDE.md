@@ -116,6 +116,47 @@ CSV — keep the core data model simple (name + duration per item) so richer
 output formats (table, CSV, Dataview-friendly frontmatter) can be layered on
 without a rewrite.
 
+### Bar chart display (opt-in)
+
+`showReadingViewBarChart` lets the output note show at a glance which item
+was the bottleneck, without the user comparing raw `HH:MM:SS` numbers by
+eye: it renders a small bar next to each timed item (`main.ts`'s
+`renderDurationBars()`, driven by the pure duration-matching/sizing logic in
+`utils/duration-bars.ts`) via `registerMarkdownPostProcessor()` — Reading
+view only, on purpose. Live Preview/Source mode is a separate rendering path
+(CodeMirror), and an earlier attempt at injecting a bar there repeatedly
+crashed the plugin with internal CodeMirror errors — see "Fixed"/history
+below before attempting that path again, and build it incrementally rather
+than assuming it'll just work.
+
+The bar renders on its own line below the item's text (a block-level
+`<div>` child of the `<li>`), not inline next to it — an inline bar's
+starting position would vary with each item's text length, since it'd sit
+right after wherever that text happens to end, making the bars hard to
+visually compare against each other. On its own line, every bar starts at
+the same left edge (the item's own text indentation) regardless of how long
+the item's text is.
+
+Since this is Reading-view-only, two more pieces close the loop so a user
+actually lands on a rendered chart instead of quietly missing it:
+
+- Clicking the finish notice (main.ts) opens the output note with
+  `{ state: { mode: 'preview' } }` — straight into Reading view — but only
+  when `showReadingViewBarChart` is on; otherwise the click respects
+  whatever mode the leaf would normally default to, since there's nothing
+  Reading-view-only to show.
+- The output note itself gets a one-time static hint (a `> [!tip]` callout,
+  written into the header alongside the other setting-gated content in
+  `appendItem()`) pointing at Reading view — written once, into the note,
+  rather than only in a transient notice, so it's still there for anyone
+  who opens the note later rather than right after the session ends.
+
+A plain-text character bar (`#`/`-`) in the written note content itself was
+also tried, but dropped in favor of the rendered bar alone — see the
+"Fixed"/history entries above for why an earlier, uncommitted attempt at a
+plain-text bar using Unicode block characters was treated with caution
+(a suspected, never-conclusively-root-caused Obsidian crash).
+
 ## Platform scope
 
 Desktop-only for now (`isDesktopOnly` can stay conservative) — weekly

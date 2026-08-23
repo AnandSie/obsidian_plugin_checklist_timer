@@ -322,6 +322,57 @@ describe('SessionManager — basic sequential timing', () => {
 	});
 });
 
+describe('SessionManager — reading view bar chart hint', () => {
+	let vault: FakeVault;
+	let clock: FakeClock;
+
+	beforeEach(() => {
+		vault = new FakeVault();
+		clock = new FakeClock();
+	});
+
+	it('omits the hint when the setting is off (default)', async () => {
+		const { manager } = makeManager(vault, clock);
+		const file = sourceFile('Week Plan.md');
+
+		await manager.handleFileContent(file, '#timed\n- [ ] Start\n- [ ] Two\n');
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [ ] Two\n');
+		clock.advance(5_000);
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n');
+
+		const content = vault.findContent('Week Plan timing');
+		assert.ok(!content?.includes('[!tip]'), `hint should not appear:\n${content}`);
+	});
+
+	it('writes a static hint pointing at Reading view once, right after the note is created', async () => {
+		const { manager } = makeManager(vault, clock, { showReadingViewBarChart: true });
+		const file = sourceFile('Week Plan.md');
+
+		await manager.handleFileContent(file, '#timed\n- [ ] Start\n- [ ] Two\n- [ ] Three\n');
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [ ] Two\n- [ ] Three\n');
+		clock.advance(5_000);
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n- [ ] Three\n');
+		clock.advance(3_000);
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n- [x] Three\n');
+
+		const content = vault.findContent('Week Plan timing');
+		assert.equal(
+			content,
+			'# Week Plan timing\n\n' +
+				'Source: [[Week Plan]]\n\n' +
+				'> [!tip] Switch to Reading view (📖 the book icon) to see each item as a bar chart.\n\n' +
+				'## In order\n\n' +
+				'- 00:00:05 - Two\n' +
+				'- 00:00:03 - Three\n' +
+				'\n**Total:** 00:00:08\n\n' +
+				'## Slowest first\n\n' +
+				'- 00:00:05 - Two\n' +
+				'- 00:00:03 - Three\n',
+		);
+		assert.equal(content?.match(/\[!tip\]/g)?.length, 1, 'the hint must appear exactly once, not per item');
+	});
+});
+
 describe('SessionManager — getActiveTask', () => {
 	let vault: FakeVault;
 	let clock: FakeClock;
