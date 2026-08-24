@@ -48,6 +48,10 @@ export interface ChecklistTimerSettings {
 	// intentionally not touched. Default off, like the plugin's other
 	// settings that change what gets shown.
 	showReadingViewBarChart: boolean;
+	// When true (default), the output note is opened automatically the
+	// moment a session finishes (completed or stopped early) — the same note
+	// the finish notice already links to, just without needing the click.
+	autoOpenOutputNote: boolean;
 }
 
 export const DEFAULT_SETTINGS: ChecklistTimerSettings = {
@@ -61,4 +65,5 @@ export const DEFAULT_SETTINGS: ChecklistTimerSettings = {
 	activeTaskTimerFormat: 'mm:ss',
 	overwriteExistingFile: false,
 	showReadingViewBarChart: false,
+	autoOpenOutputNote: true,
 };

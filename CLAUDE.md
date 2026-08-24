@@ -109,6 +109,17 @@ rather than batching everything until the end:
   duration formatted as `HH:MM:SS`.
 - Duration granularity (minutes-only, or including milliseconds) should be
   configurable eventually, but `HH:MM:SS` is the v1 default.
+- `autoOpenOutputNote` (default **on**) opens the output note automatically
+  the moment a session finishes (completed or stopped early), instead of only
+  linking to it from the clickable finish notice. It rides the same
+  `NotifyOptions.filePath` the finish notice already carries — a new
+  `autoOpen` flag on that notify call (session-manager.ts) marks *only* the
+  finish notice as eligible, since per-item notices also carry `filePath`
+  (for their own click-to-open) but auto-opening on every single check-off
+  would be disruptive rather than helpful. main.ts's notify implementation is
+  what actually calls `workspace.getLeaf(false).openFile()` when both the
+  flag and the setting are true — SessionManager stays Obsidian-UI-agnostic
+  and never opens anything itself.
 
 Future direction for output format (not v1, but worth designing toward): a
 structure that's easy to consume from Dataview queries and/or export to
@@ -144,7 +155,9 @@ actually lands on a rendered chart instead of quietly missing it:
   `{ state: { mode: 'preview' } }` — straight into Reading view — but only
   when `showReadingViewBarChart` is on; otherwise the click respects
   whatever mode the leaf would normally default to, since there's nothing
-  Reading-view-only to show.
+  Reading-view-only to show. `autoOpenOutputNote`'s auto-open (see above)
+  goes through the same `openOutputFile()` helper and honors this too, so
+  an auto-opened note also lands in Reading view when the bar chart is on.
 - The output note itself gets a one-time static hint (a `> [!tip]` callout,
   written into the header alongside the other setting-gated content in
   `appendItem()`) pointing at Reading view — written once, into the note,
@@ -261,3 +274,12 @@ identifying checklists) over inventing a new mechanism.
 - Configurable duration granularity (minutes-only, milliseconds).
 - Filename templates that integrate with existing note templates (e.g.
   Templater).
+
+## Open design questions
+
+See `BACKLOG.md` for open design/architecture questions on *existing* code
+(as opposed to the unbuilt-feature backlog above) — mostly review feedback
+that didn't block a merge but deserves a deliberate decision rather than a
+silent resolve later. Claude: check it every so often — e.g. when starting
+new work in an area it touches, or every few sessions — since nothing else
+will surface it again once its originating PR is merged and out of view.
