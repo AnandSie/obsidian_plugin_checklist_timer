@@ -165,7 +165,7 @@ describe('SessionManager — basic sequential timing', () => {
 	});
 
 	it('times each item as the gap since the previous check-off and appends incrementally', async () => {
-		const { manager, notices } = makeManager(vault, clock);
+		const { manager, notices } = makeManager(vault, clock, { showReadingViewBarChart: false });
 		const file = sourceFile('Week Plan.md');
 
 		const baseline = '#timed\n- [ ] Start\n- [ ] Two\n- [ ] Three\n';
@@ -483,8 +483,8 @@ describe('SessionManager — reading view bar chart hint', () => {
 		clock = new FakeClock();
 	});
 
-	it('omits the hint when the setting is off (default)', async () => {
-		const { manager } = makeManager(vault, clock);
+	it('omits the hint when the setting is off', async () => {
+		const { manager } = makeManager(vault, clock, { showReadingViewBarChart: false });
 		const file = sourceFile('Week Plan.md');
 
 		await manager.handleFileContent(file, '#timed\n- [ ] Start\n- [ ] Two\n');
@@ -658,7 +658,7 @@ describe('SessionManager — pause and resume', () => {
 	}
 
 	it('drops the paused span from the in-progress item’s recorded time', async () => {
-		const { manager } = makeManager(vault, clock);
+		const { manager } = makeManager(vault, clock, { showReadingViewBarChart: false });
 		const file = sourceFile('Week Plan.md');
 		await startAndCheckStart(manager, file);
 
@@ -1183,6 +1183,7 @@ describe('SessionManager — overwrite existing file setting', () => {
 		const { manager, notices } = makeManager(vault, clock, {
 			overwriteExistingFile: true,
 			filenameTemplate: '{{title}} timing',
+			showReadingViewBarChart: false,
 		});
 		const file = sourceFile('Week Plan.md');
 
