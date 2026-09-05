@@ -91,6 +91,12 @@ export class SessionManager {
 	// unchanged, flag flipped) from the list shifting under it (an insert,
 	// delete, or rename that moves every slot below it).
 	private readonly blockStateCache = new Map<string, { checked: boolean; text: string }[]>();
+	// Block keys we've already shown the "checklist changed while timing" notice
+	// for. handleFileContent runs per editor-change (≈ per keystroke), so without
+	// this a single mid-run edit — typing a new item's name, renaming one —
+	// stacks a notice per keystroke. Cleared for a block the moment it parses
+	// without a shift again, so a later, separate edit warns afresh.
+	private readonly blockShiftNotified = new Set<string>();
 
 	constructor(
 		private readonly vault: VaultAccess,
@@ -224,10 +230,15 @@ export class SessionManager {
 		// us. Skip detection for this event (the cache is already re-baselined
 		// above, so the next genuine check-off is measured cleanly against the
 		// new shape). A pure tail add/remove leaves every shared slot aligned
-		// and falls through to the normal diff untouched.
+		// and falls through to the normal diff untouched. Blind spot: a block
+		// whose items all share the same text — an insertion there preserves the
+		// prefix, so the shift isn't seen. Not worth handling (identical text is
+		// already indistinguishable in the output).
 		const shared = Math.min(previousState.length, currentState.length);
 		let midListShift = false;
 		for (let i = 0; i < shared; i++) {
+			// i is in bounds for both; the `?.` is only to satisfy
+			// noUncheckedIndexedAccess.
 			if (previousState[i]?.text !== currentState[i]?.text) {
 				midListShift = true;
 				break;
@@ -242,18 +253,32 @@ export class SessionManager {
 			) {
 				// Keep the status-bar's active-item view (getActiveTask) in step
 				// with the edited list even though nothing was timed this event.
+				// (A shift that deletes or moves the start item itself isn't fully
+				// handled — see BACKLOG.md; recomputing startIndex here at least
+				// keeps getActiveTask's pivot right for the common insert case.)
 				session.items = block.items;
-				this.notify(
-					`Checklist timer: "${session.title}" — the checklist changed while timing; that edit wasn't recorded, timing continues.`,
-					this.resultFileOptions(session),
-				);
+				session.startIndex = resolveStartIndex(block, this.settings.startTag);
+				if (!this.blockShiftNotified.has(key)) {
+					this.blockShiftNotified.add(key);
+					this.notify(
+						`Checklist timer: "${session.title}" — the checklist changed while timing; that edit wasn't recorded, timing continues.`,
+						this.resultFileOptions(session),
+					);
+				}
 			}
 			return;
 		}
+		this.blockShiftNotified.delete(key);
 
 		const newlyChecked: number[] = [];
 		currentState.forEach((state, index) => {
-			if (state.checked && !previousState[index]?.checked) newlyChecked.push(index);
+			// previousState[index] is undefined for a brand-new tail slot — an
+			// item that just appeared, not one that transitioned false -> true.
+			// Without this guard a freshly appended `- [x]` line reads as a
+			// check-off (and, at the last slot, finishes and resets the run).
+			if (state.checked && previousState[index] && !previousState[index].checked) {
+				newlyChecked.push(index);
+			}
 		});
 
 		const startIndex = resolveStartIndex(block, this.settings.startTag);

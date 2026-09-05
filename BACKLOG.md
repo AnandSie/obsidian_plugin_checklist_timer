@@ -56,14 +56,23 @@ The safety net that shipped only *contains* the failure mode: when item text
 at a shared slot changes (an insert/delete/rename that shifted the list), it
 skips detection for that event and notifies the user, rather than recording a
 phantom timing. It does **not** make mid-run edits work — the edit is simply
-not timed, and two cases are still unhandled entirely:
+not timed, and these cases are still unhandled:
 
 - **Edits above the block / block splits.** Inserting or deleting lines above
   the `#timed` tag moves `block.startLine`, so `blockKey` and `isSameBlock`
   stop matching and the session detaches. A blank/paragraph/indented line
   mid-list splits the block; only the tagged top half stays timed.
+- **Deleting or moving the start item itself mid-run.** The safety net updates
+  `session.items` and recomputes `session.startIndex` on a shift, but if the
+  in-progress item slides up to become the new index-0 start item, checking it
+  off next hits the `index === startIndex` branch in `handleItemChecked` and is
+  read as a restart ("already being timed"), losing that item's elapsed time.
+  Proper handling needs identity-based start-item tracking (point 2 below).
 - **A genuine check-off in the same editor event as a structural edit** is
   swallowed by the safety net (the user has to re-tick).
+- **A block whose items all share identical text.** An insertion preserves the
+  common prefix, so the text comparison sees no shift. Degenerate; noted only
+  for completeness (identical text is already indistinguishable downstream).
 
 **Fuller fix (not applied):**
 
