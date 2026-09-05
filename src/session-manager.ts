@@ -371,9 +371,27 @@ export class SessionManager {
 			try {
 				await this.writeNoteContent(outputFile, (current) =>
 					current
-						.replace(/^end: \n/m, `end: ${formatTimestamp(this.now())}\n`)
-						.replace(/^total: \n/m, `total: ${formatDuration(totalMs)}\n`)
-						.replace(/^longest: \n/m, `longest: ${formatDuration(longestMs)}\n`) + footer,
+						// `.*` (not an exact "key: " match) so this still finds the
+						// placeholder line even if Obsidian has rewritten the
+						// frontmatter in the meantime — e.g. the output note being
+						// open in a pane's Properties panel (a real, documented case
+						// here — see autoOpenOutputNote/EditorAccess) strips the
+						// trailing space from an empty `end: ` down to `end:`. An
+						// exact-match regex would silently no-op here, leaving the
+						// note looking exactly like an *abandoned* one even though
+						// the run completed normally.
+						//
+						// `end` uses lastEventTime (the last check-off), not
+						// this.now() (the moment finishSession itself runs) — for a
+						// natural completion the two are the same instant, but for a
+						// manual stop there can be an arbitrary idle gap between the
+						// last check-off and pressing stop. Using lastEventTime keeps
+						// `end - start` always equal to `total`, which is what a
+						// Dataview query computing session length from these
+						// properties would otherwise silently get wrong.
+						.replace(/^end:.*$/m, `end: ${formatTimestamp(session.lastEventTime)}`)
+						.replace(/^total:.*$/m, `total: ${formatDuration(totalMs)}`)
+						.replace(/^longest:.*$/m, `longest: ${formatDuration(longestMs)}`) + footer,
 				);
 			} catch (err) {
 				footerErrorMessage = String(err);

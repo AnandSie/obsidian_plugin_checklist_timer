@@ -405,13 +405,48 @@ describe('SessionManager — output note frontmatter', () => {
 		clock.advance(3_000);
 		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n- [ ] Three\n');
 
+		// An idle gap between the last check-off and the stop command itself —
+		// `end` must reflect the former (the last metered instant), not the
+		// latter, so `end - start` stays equal to `total` rather than
+		// over-counting the idle tail. See finishSession's comment on this.
+		clock.advance(10 * 60_000);
 		await manager.stopActiveSession();
 
 		const content = vault.findContent('Week Plan timing');
-		assert.ok(content?.includes('\nend: 1970-01-01T00:00:03\n'));
+		assert.ok(content?.includes('\nend: 1970-01-01T00:00:03\n'), 'end must be the last check-off, not the later stop time');
 		assert.ok(content?.includes('\ntotal: 00:00:03\n'));
 		assert.ok(content?.includes('\nlongest: 00:00:03\n'));
 		assert.ok(content?.includes('**Total:** 00:00:03 (stopped early)'));
+	});
+
+	it('still fills in end/total/longest when the placeholder lines no longer have their exact original spacing', async () => {
+		const { manager } = makeManager(vault, clock);
+		const file = sourceFile('Week Plan.md');
+
+		await manager.handleFileContent(file, '#timed\n- [ ] Start\n- [ ] Two\n');
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [ ] Two\n');
+		clock.advance(1_000);
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n');
+
+		// Simulates Obsidian rewriting the note's raw frontmatter out from
+		// under us — e.g. its Properties panel (shown while the note is open
+		// in a pane, a documented case here via autoOpenOutputNote/
+		// EditorAccess) strips the trailing space from an empty `end: ` down
+		// to `end:` when it re-serializes the YAML block. The fill-in must
+		// still find and replace these lines, not silently no-op.
+		const outputPath = [...vault.files.keys()][0] as string;
+		const rewritten = (vault.files.get(outputPath) as string)
+			.replace('end: \n', 'end:\n')
+			.replace('total: \n', 'total:\n')
+			.replace('longest: \n', 'longest:\n');
+		vault.files.set(outputPath, rewritten);
+
+		await manager.stopActiveSession();
+
+		const content = vault.files.get(outputPath);
+		assert.ok(content?.includes('\nend: 1970-01-01T00:00:01\n'));
+		assert.ok(content?.includes('\ntotal: 00:00:01\n'));
+		assert.ok(content?.includes('\nlongest: 00:00:01\n'));
 	});
 });
 
