@@ -179,6 +179,29 @@ crashed the plugin with internal CodeMirror errors — see "Fixed"/history
 below before attempting that path again, and build it incrementally rather
 than assuming it'll just work.
 
+Because it's **default on** rather than opt-in, note scoping needs two
+signals, not one. The post-processor guards with `sectionInfo.text` (the
+whole note's raw source) containing *both* `OUTPUT_NOTE_MARKER`
+(`## In order`) *and* a `^longest:` frontmatter line. The heading alone is a
+generic string an unrelated note (workout splits, cooking times, a
+timestamped log with `HH:MM:SS - text` list items) could carry — an
+acceptable false-positive while the feature was opt-in, but every user's
+problem once it renders by default. The `longest:` key is written into the
+frontmatter at note-creation time (blank until finish), so it's a reliable
+"this is one of ours" marker present even on an incomplete/abandoned run —
+exactly the case where `## In order` is the only body signal.
+
+There is deliberately **no migration** for the default flip. `saveSettings()`
+persists the whole settings object, so any existing user who ever changed a
+setting has `showReadingViewBarChart: false` in `data.json` and won't pick
+up the new default — only fresh installs and never-configured users do. A
+write-on-load force-flip was considered and rejected: it can't distinguish a
+deliberate opt-out from a `false` persisted as a side-effect of saving
+something unrelated, and a persistent "already migrated" marker plus a
+write from `loadSettings()` is a lot of moving parts for a cosmetic default.
+Existing users (the author included) just enable it once per vault; the
+release notes call this out.
+
 The bar renders on its own line below the item's text (a block-level
 `<div>` child of the `<li>`), not inline next to it — an inline bar's
 starting position would vary with each item's text length, since it'd sit

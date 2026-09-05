@@ -100,12 +100,22 @@ export default class ChecklistTimerPlugin extends Plugin {
 			// any rendered list item elsewhere that happens to read
 			// "HH:MM:SS - text" (e.g. a personal log entry) would get a fake bar
 			// too. getSectionInfo's `text` is the whole document's raw source
-			// (not just this element's section), so this check is accurate
+			// (not just this element's section), so these checks are accurate
 			// regardless of which part of the note this particular call covers.
 			// A null sectionInfo (which the Obsidian API says can happen) fails
 			// closed — no bar — rather than risk a false positive elsewhere.
 			const sectionInfo = ctx.getSectionInfo(el);
-			if (!sectionInfo?.text.includes(OUTPUT_NOTE_MARKER)) return;
+			if (!sectionInfo) return;
+			// Two independent signals, both required. The "## In order" heading
+			// alone (OUTPUT_NOTE_MARKER) is a generic string a workout log or a
+			// cooking-times note could plausibly carry alongside HH:MM:SS list
+			// items — an acceptable false-positive risk while this was opt-in,
+			// but not now that it renders for everyone by default. The plugin's
+			// own output notes also always carry a `longest:` frontmatter key,
+			// written the moment the note is created (blank until the session
+			// finishes — see session-manager.ts), which a stray note won't have.
+			if (!sectionInfo.text.includes(OUTPUT_NOTE_MARKER)) return;
+			if (!/^longest:/m.test(sectionInfo.text)) return;
 			this.renderDurationBars(el);
 		});
 
@@ -260,6 +270,14 @@ export default class ChecklistTimerPlugin extends Plugin {
 	}
 
 	async loadSettings() {
+		// Note the flip of showReadingViewBarChart to default-on only reaches
+		// fresh installs and users who never triggered a saveSettings() write —
+		// anyone with the old `false` persisted in data.json keeps it, by
+		// design. No migration: a write-on-load force-flip can't tell a
+		// deliberate opt-out from a `false` persisted as a side-effect of
+		// saving some unrelated setting, and that machinery isn't worth it for
+		// a cosmetic default. Existing users (the author included) enable it
+		// once per vault; called out in the release notes.
 		this.settings = Object.assign(
 			{},
 			DEFAULT_SETTINGS,
