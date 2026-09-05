@@ -923,6 +923,246 @@ describe('SessionManager — two checklists started while one is running', () =>
 	});
 });
 
+describe('SessionManager — checklist edited mid-run', () => {
+	let vault: FakeVault;
+	let clock: FakeClock;
+
+	beforeEach(() => {
+		vault = new FakeVault();
+		clock = new FakeClock();
+	});
+
+	// Keeps FakeVault's "disk" in sync so the resetOnCompletion read/modify
+	// fallback works, mirroring how main.ts always re-hands the content it read.
+	async function tick(manager: SessionManager, file: TFile, content: string) {
+		vault.disk.set(file.path, content);
+		await manager.handleFileContent(file, content);
+	}
+
+	it('does not record a phantom item when an unchecked item is inserted above the current one', async () => {
+		const { manager, notices } = makeManager(vault, clock);
+		const file = sourceFile('Week Plan.md');
+
+		await tick(manager, file, '#timed\n- [ ] Start\n- [ ] A\n- [ ] B\n- [ ] C\n');
+		await tick(manager, file, '#timed\n- [x] Start\n- [ ] A\n- [ ] B\n- [ ] C\n');
+		clock.advance(5_000);
+		await tick(manager, file, '#timed\n- [x] Start\n- [x] A\n- [ ] B\n- [ ] C\n');
+		const beforeInsert = vault.findContent('Week Plan timing');
+		assert.ok(beforeInsert?.endsWith('## In order\n\n- 00:00:05 - A\n'), 'only "A" timed so far');
+
+		// "X" inserted between the last checked item and the current one — every
+		// slot from "B" down shifts, which the old positional diff misread as a
+		// check-off.
+		clock.advance(60_000);
+		await tick(manager, file, '#timed\n- [x] Start\n- [x] A\n- [ ] X\n- [ ] B\n- [ ] C\n');
+
+		assert.equal(
+			vault.findContent('Week Plan timing'),
+			beforeInsert,
+			'no phantom line should be appended for the insertion',
+		);
+		assert.ok(
+			notices.some((n) => n.includes('changed while timing')),
+			'the user should be told the edit was not recorded',
+		);
+
+		// Timing carries on: "B" still accrues from when "A" was checked, the
+		// 60s spent editing included (the clock was never reset by a phantom).
+		clock.advance(3_000);
+		await tick(manager, file, '#timed\n- [x] Start\n- [x] A\n- [ ] X\n- [x] B\n- [ ] C\n');
+		assert.ok(
+			vault.findContent('Week Plan timing')?.includes('- 00:01:03 - B\n'),
+			'B should be timed normally after the insert, with its clock intact',
+		);
+	});
+
+	it('does not finish or reset the checklist when an item is inserted among already-checked items', async () => {
+		const { manager, notices } = makeManager(vault, clock);
+		const file = sourceFile('Week Plan.md');
+
+		await tick(manager, file, '#timed\n- [ ] Start\n- [ ] A\n- [ ] B\n- [ ] C\n');
+		await tick(manager, file, '#timed\n- [x] Start\n- [ ] A\n- [ ] B\n- [ ] C\n');
+		clock.advance(2_000);
+		await tick(manager, file, '#timed\n- [x] Start\n- [x] A\n- [ ] B\n- [ ] C\n');
+
+		await tick(manager, file, '#timed\n- [x] Start\n- [ ] X\n- [x] A\n- [ ] B\n- [ ] C\n');
+
+		assert.equal(manager.hasActiveSession(), true, 'the session must stay active');
+		assert.ok(!notices.some((n) => n.includes('finished in')), 'no premature finish');
+		assert.equal(
+			vault.disk.get('Week Plan.md'),
+			'#timed\n- [x] Start\n- [ ] X\n- [x] A\n- [ ] B\n- [ ] C\n',
+			'the checklist must not be reset/unchecked',
+		);
+	});
+
+	it('does not record a phantom item when a checked item is deleted after an out-of-order check-off', async () => {
+		const { manager, notices } = makeManager(vault, clock);
+		const file = sourceFile('Week Plan.md');
+
+		await tick(manager, file, '#timed\n- [ ] Start\n- [ ] A\n- [ ] B\n- [ ] C\n- [ ] D\n');
+		await tick(manager, file, '#timed\n- [x] Start\n- [ ] A\n- [ ] B\n- [ ] C\n- [ ] D\n');
+		clock.advance(2_000);
+		await tick(manager, file, '#timed\n- [x] Start\n- [x] A\n- [ ] B\n- [ ] C\n- [ ] D\n');
+		// "C" checked out of order, before "B".
+		clock.advance(1_000);
+		await tick(manager, file, '#timed\n- [x] Start\n- [x] A\n- [ ] B\n- [x] C\n- [ ] D\n');
+
+		const before = vault.findContent('Week Plan timing');
+		// Delete "A" (a checked item) — slots below it shift up.
+		await tick(manager, file, '#timed\n- [x] Start\n- [ ] B\n- [x] C\n- [ ] D\n');
+
+		assert.equal(
+			vault.findContent('Week Plan timing'),
+			before,
+			'deleting a checked item must not append anything to the output note',
+		);
+		assert.ok(notices.some((n) => n.includes('changed while timing')));
+	});
+
+	it('still times an item appended at the end of the list mid-run', async () => {
+		const { manager, notices } = makeManager(vault, clock);
+		const file = sourceFile('Week Plan.md');
+
+		await tick(manager, file, '#timed\n- [ ] Start\n- [ ] A\n- [ ] B\n');
+		await tick(manager, file, '#timed\n- [x] Start\n- [ ] A\n- [ ] B\n');
+		clock.advance(5_000);
+		await tick(manager, file, '#timed\n- [x] Start\n- [x] A\n- [ ] B\n');
+
+		// Append "C" — a pure tail add, no slot shifts.
+		await tick(manager, file, '#timed\n- [x] Start\n- [x] A\n- [ ] B\n- [ ] C\n');
+		assert.ok(
+			!notices.some((n) => n.includes('changed while timing')),
+			'a tail append is benign and should not warn',
+		);
+
+		clock.advance(3_000);
+		await tick(manager, file, '#timed\n- [x] Start\n- [x] A\n- [x] B\n- [ ] C\n');
+		clock.advance(1_000);
+		await tick(manager, file, '#timed\n- [x] Start\n- [x] A\n- [x] B\n- [x] C\n');
+
+		const content = vault.findContent('Week Plan timing');
+		assert.ok(content?.includes('- 00:00:03 - B\n'));
+		assert.ok(content?.includes('- 00:00:01 - C\n'), 'the appended item is timed like any other');
+		assert.ok(notices.some((n) => n.includes('finished in')));
+	});
+
+	it('is unaffected by deleting a trailing unchecked item', async () => {
+		const { manager, notices } = makeManager(vault, clock);
+		const file = sourceFile('Week Plan.md');
+
+		await tick(manager, file, '#timed\n- [ ] Start\n- [ ] A\n- [ ] B\n- [ ] C\n');
+		await tick(manager, file, '#timed\n- [x] Start\n- [ ] A\n- [ ] B\n- [ ] C\n');
+		clock.advance(5_000);
+		await tick(manager, file, '#timed\n- [x] Start\n- [x] A\n- [ ] B\n- [ ] C\n');
+
+		// Drop the trailing "C" — every remaining slot stays aligned.
+		await tick(manager, file, '#timed\n- [x] Start\n- [x] A\n- [ ] B\n');
+		assert.ok(!notices.some((n) => n.includes('changed while timing')));
+
+		clock.advance(3_000);
+		await tick(manager, file, '#timed\n- [x] Start\n- [x] A\n- [x] B\n');
+
+		const content = vault.findContent('Week Plan timing');
+		assert.ok(content?.includes('- 00:00:03 - B\n'));
+		assert.ok(notices.some((n) => n.includes('finished in')), 'B is now the last item and finishes the run');
+	});
+
+	it('does not finish or reset the run when an already-checked item is appended at the tail', async () => {
+		const { manager, notices } = makeManager(vault, clock);
+		const file = sourceFile('Week Plan.md');
+
+		await tick(manager, file, '#timed\n- [ ] Start\n- [ ] A\n- [ ] B\n');
+		await tick(manager, file, '#timed\n- [x] Start\n- [ ] A\n- [ ] B\n');
+		clock.advance(5_000);
+		await tick(manager, file, '#timed\n- [x] Start\n- [x] A\n- [ ] B\n');
+
+		const before = vault.findContent('Week Plan timing');
+		// A pasted-in, already-checked item lands at the end — it never
+		// transitioned false -> true, so it must not read as a check-off (which
+		// at the last slot would finish + reset the run).
+		clock.advance(60_000);
+		await tick(manager, file, '#timed\n- [x] Start\n- [x] A\n- [ ] B\n- [x] C\n');
+
+		assert.equal(vault.findContent('Week Plan timing'), before, 'no phantom line for the appended item');
+		assert.equal(manager.hasActiveSession(), true, 'the run must not have finished');
+		assert.ok(!notices.some((n) => n.includes('finished in')));
+		assert.equal(
+			vault.disk.get('Week Plan.md'),
+			'#timed\n- [x] Start\n- [x] A\n- [ ] B\n- [x] C\n',
+			'the source checklist must not be reset',
+		);
+
+		// The real current item still times normally afterwards.
+		clock.advance(3_000);
+		await tick(manager, file, '#timed\n- [x] Start\n- [x] A\n- [x] B\n- [x] C\n');
+		assert.ok(vault.findContent('Week Plan timing')?.includes('- 00:01:03 - B\n'));
+	});
+
+	it('warns once, not once per keystroke, while an item is being renamed mid-run', async () => {
+		const { manager, notices } = makeManager(vault, clock);
+		const file = sourceFile('Week Plan.md');
+
+		await tick(manager, file, '#timed\n- [ ] Start\n- [ ] A\n- [ ] B\n');
+		await tick(manager, file, '#timed\n- [x] Start\n- [ ] A\n- [ ] B\n');
+		clock.advance(5_000);
+		await tick(manager, file, '#timed\n- [x] Start\n- [x] A\n- [ ] B\n');
+
+		// Successive editor-change events as the user types into "B".
+		await tick(manager, file, '#timed\n- [x] Start\n- [x] A\n- [ ] B r\n');
+		await tick(manager, file, '#timed\n- [x] Start\n- [x] A\n- [ ] B re\n');
+		await tick(manager, file, '#timed\n- [x] Start\n- [x] A\n- [ ] B rev\n');
+
+		assert.equal(
+			notices.filter((n) => n.includes('changed while timing')).length,
+			1,
+			'a multi-keystroke rename should produce a single notice',
+		);
+		assert.equal(manager.hasActiveSession(), true);
+
+		// Checking the renamed item is a clean event — it re-arms the warning.
+		clock.advance(3_000);
+		await tick(manager, file, '#timed\n- [x] Start\n- [x] A\n- [x] B rev\n');
+		assert.ok(vault.findContent('Week Plan timing')?.includes('- 00:00:03 - B rev\n'));
+	});
+
+	it('warns and records nothing when two items are reordered mid-run', async () => {
+		const { manager, notices } = makeManager(vault, clock);
+		const file = sourceFile('Week Plan.md');
+
+		await tick(manager, file, '#timed\n- [ ] Start\n- [ ] A\n- [ ] B\n- [ ] C\n');
+		await tick(manager, file, '#timed\n- [x] Start\n- [ ] A\n- [ ] B\n- [ ] C\n');
+		clock.advance(5_000);
+		await tick(manager, file, '#timed\n- [x] Start\n- [x] A\n- [ ] B\n- [ ] C\n');
+
+		const before = vault.findContent('Week Plan timing');
+		// Swap the two still-pending items.
+		await tick(manager, file, '#timed\n- [x] Start\n- [x] A\n- [ ] C\n- [ ] B\n');
+
+		assert.equal(vault.findContent('Week Plan timing'), before, 'a reorder must not append anything');
+		assert.ok(notices.some((n) => n.includes('changed while timing')));
+		assert.equal(manager.hasActiveSession(), true);
+	});
+
+	it('re-baselines silently, with no notice, when no session is active', async () => {
+		const { manager, notices } = makeManager(vault, clock);
+		const file = sourceFile('Week Plan.md');
+
+		await tick(manager, file, '#timed\n- [ ] Start\n- [ ] A\n- [ ] B\n');
+		// Insert an item before anything has been started.
+		await tick(manager, file, '#timed\n- [ ] Start\n- [ ] X\n- [ ] A\n- [ ] B\n');
+
+		assert.deepEqual(notices, [], 'no session — the edit is absorbed silently');
+		assert.equal(vault.files.size, 0);
+
+		// A subsequent normal run still works against the new shape.
+		await tick(manager, file, '#timed\n- [x] Start\n- [ ] X\n- [ ] A\n- [ ] B\n');
+		clock.advance(2_000);
+		await tick(manager, file, '#timed\n- [x] Start\n- [x] X\n- [ ] A\n- [ ] B\n');
+		assert.ok(vault.findContent('Week Plan timing')?.includes('- 00:00:02 - X\n'));
+	});
+});
+
 describe('SessionManager — reset checklist on completion', () => {
 	let vault: FakeVault;
 	let clock: FakeClock;
