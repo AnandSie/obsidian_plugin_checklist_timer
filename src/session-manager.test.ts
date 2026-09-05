@@ -203,6 +203,30 @@ describe('SessionManager — basic sequential timing', () => {
 		assert.ok(notices.some((n) => n.includes('finished in') && n.includes('click to open')));
 	});
 
+	it('appends the slowest-first summary + Total instead of dropping them when the "## In order" marker is gone from the body', async () => {
+		const { manager, notices } = makeManager(vault, clock);
+		const file = sourceFile('Week Plan.md');
+
+		await manager.handleFileContent(file, '#timed\n- [ ] Start\n- [ ] Two\n- [ ] Three\n');
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [ ] Two\n- [ ] Three\n');
+		clock.advance(5_000);
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n- [ ] Three\n');
+
+		// Simulate the heading being renamed/removed (e.g. edited in an open
+		// pane, or restructured by another plugin) before the session finishes.
+		const outputPath = [...vault.files.keys()].find((p) => p.includes('Week Plan timing'));
+		assert.ok(outputPath);
+		vault.files.set(outputPath, vault.files.get(outputPath)!.replace('## In order\n\n', ''));
+
+		clock.advance(3_000);
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n- [x] Three\n');
+
+		const content = vault.findContent('Week Plan timing');
+		assert.ok(content?.includes('## Slowest first\n\n- 00:00:05 - Two\n- 00:00:03 - Three\n\n**Total:** 00:00:08\n'));
+		assert.match(content ?? '', /total: 00:00:08/);
+		assert.ok(notices.some((n) => n.includes('finished in') && n.includes('click to open')));
+	});
+
 	it('does not time items before the start item', async () => {
 		const { manager } = makeManager(vault, clock);
 		const file = sourceFile('Note.md');

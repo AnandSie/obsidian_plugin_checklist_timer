@@ -109,7 +109,12 @@ rather than batching everything until the end:
   marker). So the bottleneck view is what the reader sees first on opening
   the note, without scrolling past the raw chronological run; the
   comparison is never done by eye. The final note order is therefore:
-  header → `## Slowest first` → Total → `## In order`.
+  header → `## Slowest first` → Total → `## In order`. If the
+  `OUTPUT_NOTE_MARKER` heading is somehow missing from the body at finish
+  time (renamed in an open pane, restructured by another plugin, a future
+  change to the constant), `finishSession` falls back to *appending* the
+  summary block rather than letting the no-op `.replace` silently drop the
+  Total line and the bottleneck list while the run still reports as done.
 - Output location: configurable folder path, defaulting to vault root.
 - Filename: configurable via a template (further templating, e.g. reusing the
   user's existing Templater templates, is a future idea — not v1).
