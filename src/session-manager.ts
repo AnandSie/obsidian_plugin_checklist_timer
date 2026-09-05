@@ -37,7 +37,7 @@ interface ActiveSession {
 	// so a session with zero timed items leaves no stray file behind.
 	outputFile: TFile | null;
 	// Kept in memory (in addition to being appended line-by-line) so the
-	// finish footer can add a slowest-first summary. If Obsidian crashes
+	// finish write can add a slowest-first summary. If Obsidian crashes
 	// before finish, this in-memory copy is lost, but the already-appended
 	// lines in the note are not — see CLAUDE.md.
 	results: TimedResult[];
@@ -445,12 +445,16 @@ export class SessionManager {
 			const slowestFirstLines = slowestFirst
 				.map((result) => `- ${formatDuration(result.durationMs)} - ${result.text}`)
 				.join('\n');
-			const footer =
-				`\n**Total:** ${formatDuration(totalMs)}${suffix}\n\n` +
-				`## Slowest first\n\n${slowestFirstLines}\n`;
+			// `## Slowest first` list + the `**Total:**` line — the bottleneck
+			// view this plugin exists to surface. A `$` in an item's text is
+			// safe here: it's only ever concatenated, never used as a
+			// replacement string.
+			const summaryBlock =
+				`## Slowest first\n\n${slowestFirstLines}\n\n` +
+				`**Total:** ${formatDuration(totalMs)}${suffix}`;
 			try {
-				await this.writeNoteContent(outputFile, (current) =>
-					current
+				await this.writeNoteContent(outputFile, (current) => {
+					const withFrontmatter = current
 						// `.*` (not an exact "key: " match) so this still finds the
 						// placeholder line even if Obsidian has rewritten the
 						// frontmatter in the meantime — e.g. the output note being
@@ -477,8 +481,23 @@ export class SessionManager {
 							`end: ${formatTimestamp(session.lastEventTime - session.pausedMs)}`,
 						)
 						.replace(/^total:.*$/m, `total: ${formatDuration(totalMs)}`)
-						.replace(/^longest:.*$/m, `longest: ${formatDuration(longestMs)}`) + footer,
-				);
+						.replace(/^longest:.*$/m, `longest: ${formatDuration(longestMs)}`);
+					// Normally the summary goes *above* the incrementally-built
+					// "## In order" list (OUTPUT_NOTE_MARKER): that list can only
+					// ever be chronological (items are written as they're checked
+					// off), so leading with the slowest-first view is what the
+					// reader sees on opening the note, without scrolling past the
+					// raw run. But if the marker isn't in the body — a user
+					// renamed the heading in an open pane, another plugin
+					// restructured the note, a future change to the constant — a
+					// plain `.replace` would no-op and silently drop the Total
+					// line and the bottleneck view while the run still reports as
+					// finished. Fall back to appending so the summary is always
+					// written somewhere.
+					return withFrontmatter.includes(OUTPUT_NOTE_MARKER)
+						? withFrontmatter.replace(OUTPUT_NOTE_MARKER, () => `${summaryBlock}\n\n${OUTPUT_NOTE_MARKER}`)
+						: `${withFrontmatter}\n${summaryBlock}\n`;
+				});
 			} catch (err) {
 				footerErrorMessage = String(err);
 			}
