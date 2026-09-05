@@ -107,6 +107,28 @@ rather than batching everything until the end:
   user's existing Templater templates, is a future idea — not v1).
 - Content format (v1): a simple bulleted list of `duration - item name`,
   duration formatted as `HH:MM:SS`.
+- The note also carries normal Obsidian properties (YAML frontmatter):
+  `start`, `end`, `total`, `longest` — a first, small step toward the
+  Dataview-friendly direction described below, without waiting for the full
+  table/CSV rework. `start` is written the moment the note is created (on
+  the first timed item), since the session's actual start time is already
+  known by then. `end`/`total`/`longest` are declared at that same moment
+  too, but with **empty values** — they're not known until the session
+  finishes, but pre-declaring the keys (rather than adding them only at the
+  end) means the Properties panel shows a consistent shape from the note's
+  first line onward, and a note left behind by a crash or an abandoned run
+  (see "No session-state persistence" above) reads correctly as
+  *incomplete* rather than missing the fields outright. `finishSession`
+  (session-manager.ts) fills them in via simple line-anchored string
+  replacement (`^end: \n` etc.) in the same write that appends the footer —
+  no YAML parser involved, consistent with how the rest of this file is
+  built. Timestamps use UTC (`formatTimestamp`, utils/format.ts) rather than
+  local time, matching `renderFilename`'s existing `{{date}}` and keeping
+  output (and tests) independent of the machine's timezone. `total`/
+  `longest` reuse `formatDuration`'s `HH:MM:SS`, matching the body list —
+  unlike the body's "Total" line, the frontmatter `total` never gets the
+  `(stopped early)` suffix, since that's a display-only annotation and the
+  property should hold a plain, parseable duration.
 - Duration granularity (minutes-only, or including milliseconds) should be
   configurable eventually, but `HH:MM:SS` is the v1 default.
 - `autoOpenOutputNote` (default **on**) opens the output note automatically
