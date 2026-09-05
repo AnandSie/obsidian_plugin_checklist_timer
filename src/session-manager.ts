@@ -56,6 +56,13 @@ interface ActiveSession {
 	// resumeSession (or the next check-off) folds the paused span out of
 	// lastEventTime so time spent paused is never attributed to any item.
 	pausedAt: number | null;
+	// Cumulative length of every *resolved* pause (each folded span, summed by
+	// applyPauseOffset). finishSession subtracts this from lastEventTime when
+	// writing the `end` frontmatter property, so `end - start` stays equal to
+	// `total` — the invariant the output-format section of CLAUDE.md relies on
+	// — even across pauses. A still-open pause isn't counted (it lies after
+	// the last check-off, so it doesn't affect `end` anyway).
+	pausedMs: number;
 }
 
 // Public snapshot of the item currently being timed, for status bar display.
@@ -172,7 +179,9 @@ export class SessionManager {
 	// still paused (an implicit resume).
 	private applyPauseOffset(session: ActiveSession) {
 		if (session.pausedAt === null) return;
-		session.lastEventTime += this.now() - session.pausedAt;
+		const span = this.now() - session.pausedAt;
+		session.lastEventTime += span;
+		session.pausedMs += span;
 		session.pausedAt = null;
 	}
 
@@ -314,6 +323,7 @@ export class SessionManager {
 			items: block.items,
 			startIndex,
 			pausedAt: null,
+			pausedMs: 0,
 		};
 		this.notify(`▶️ "${title}" started`);
 		this.onStatusChange();
@@ -455,11 +465,17 @@ export class SessionManager {
 						// this.now() (the moment finishSession itself runs) — for a
 						// natural completion the two are the same instant, but for a
 						// manual stop there can be an arbitrary idle gap between the
-						// last check-off and pressing stop. Using lastEventTime keeps
-						// `end - start` always equal to `total`, which is what a
-						// Dataview query computing session length from these
+						// last check-off and pressing stop. `pausedMs` is then
+						// subtracted so paused spans don't inflate it either: every
+						// item's recorded duration already excludes pause time, so
+						// `total` does too, and `end` has to match. Together this
+						// keeps `end - start` always equal to `total`, which is what
+						// a Dataview query computing session length from these
 						// properties would otherwise silently get wrong.
-						.replace(/^end:.*$/m, `end: ${formatTimestamp(session.lastEventTime)}`)
+						.replace(
+							/^end:.*$/m,
+							`end: ${formatTimestamp(session.lastEventTime - session.pausedMs)}`,
+						)
 						.replace(/^total:.*$/m, `total: ${formatDuration(totalMs)}`)
 						.replace(/^longest:.*$/m, `longest: ${formatDuration(longestMs)}`) + footer,
 				);

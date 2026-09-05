@@ -648,7 +648,8 @@ describe('SessionManager — pause and resume', () => {
 
 		assert.equal(
 			vault.findContent('Week Plan timing'),
-			'# Week Plan timing\n\nSource: [[Week Plan]]\n\n## In order\n\n- 00:00:05 - Two\n',
+			'---\nstart: 1970-01-01T00:00:00\nend: \ntotal: \nlongest: \n---\n\n' +
+				'# Week Plan timing\n\nSource: [[Week Plan]]\n\n## In order\n\n- 00:00:05 - Two\n',
 		);
 	});
 
@@ -686,6 +687,29 @@ describe('SessionManager — pause and resume', () => {
 		const content = vault.findContent('Week Plan timing');
 		assert.ok(content?.includes('**Total:** 00:00:06 (stopped early)'));
 		assert.ok(!content?.includes('Three'));
+	});
+
+	it('keeps the end/total frontmatter invariant (end - start == total) across pauses', async () => {
+		const { manager } = makeManager(vault, clock);
+		const file = sourceFile('Week Plan.md');
+		await startAndCheckStart(manager, file);
+
+		clock.advance(5_000); // active for "Two"
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n- [ ] Three\n');
+
+		manager.pauseSession();
+		clock.advance(90_000); // a long break — must not land in end/total
+		manager.resumeSession();
+
+		clock.advance(3_000); // active for "Three"
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n- [x] Three\n');
+
+		const content = vault.findContent('Week Plan timing');
+		// start 1970-01-01T00:00:00, total 00:00:08 -> end must be
+		// 1970-01-01T00:00:08, not ...:01:38 (which would include the 90s pause).
+		assert.ok(content?.includes('start: 1970-01-01T00:00:00\n'), content);
+		assert.ok(content?.includes('end: 1970-01-01T00:00:08\n'), content);
+		assert.ok(content?.includes('total: 00:00:08\n'), content);
 	});
 
 	it('getActiveTask reports the pause instant while paused, then null again after resume', async () => {

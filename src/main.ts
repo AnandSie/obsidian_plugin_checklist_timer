@@ -260,7 +260,14 @@ export default class ChecklistTimerPlugin extends Plugin {
 		const icon = task.pausedAt !== null ? '⏸' : '⏱';
 		this.statusBarItemEl.setText(`${icon} ${truncateTaskName(task.name)}: ${elapsed}`);
 		this.statusBarItemEl.show();
-		this.startActiveTaskTicker();
+		if (task.pausedAt !== null) {
+			// The readout is frozen — no reason to keep waking once a second
+			// through what could be a long break. resumeSession fires
+			// onStatusChange again, which lands back here and restarts it.
+			this.stopActiveTaskTicker();
+		} else {
+			this.startActiveTaskTicker();
+		}
 	}
 
 	// Only ticks while the status bar item actually has something to show —
