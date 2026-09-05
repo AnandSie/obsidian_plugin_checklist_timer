@@ -303,9 +303,44 @@ identifying checklists) over inventing a new mechanism.
 
 ## Known issues / possible bugs (unconfirmed)
 
-*(none currently — see "Fixed" below for the entry this section used to hold)*
+- **Editing text *above* a running checklist, or splitting its block, detaches
+  the session.** The block is identified by `path#firstItemLine` (`blockKey`)
+  and `isSameBlock` compares `session.blockStartLine` to the freshly-parsed
+  line. Inserting/deleting lines above the `#timed` tag shifts that line, so
+  subsequent check-offs read as a *different* block — "not tracked" notices, or
+  checking the start item auto-switches and stops the run. A blank/paragraph/
+  indented line dropped mid-list splits the one block in two (only the top half
+  keeps the tag). Not yet addressed; the deliberate design call on the real fix
+  (identity-based item matching + a stable block anchor) is written up in
+  `BACKLOG.md`. *Within*-block structural edits are handled — see "Fixed" below.
 
 ## Fixed
+
+- **Inserting/deleting a checklist item mid-run recorded phantom timings.**
+  Check-off detection in `processBlock` (session-manager.ts) was a purely
+  positional diff: slot N is "newly checked" iff its checked-boolean went
+  `false → true` since the previous parse, compared against `blockStateCache`.
+  That assumes the list is stable. Inserting, deleting, or renaming an item
+  anywhere above the first unchecked box shifts every slot below it, and the
+  diff then misreads the shift as a check-off — appending a bogus
+  `- HH:MM:SS - <item>` line to the output note and resetting the in-progress
+  item's clock (`lastEventTime`), so the real current item lost its accrued
+  time. (A premature `finishSession` / `resetOnCompletion` from this is *not*
+  reachable: the last slot always holds the still-unchecked last item, so it
+  never flips `false → true` by a shift alone — only a genuine check-off of the
+  last item finishes a run.) Safe cases that had to stay safe: appending items
+  at the end, deleting trailing/unchecked items, deleting the current item.
+  - **Fix**: `blockStateCache` now stores `{ checked, text }[]` instead of
+    `boolean[]`. Before running the diff, `processBlock` compares item *text* at
+    each shared slot; if any differs, the list moved under us, so it
+    re-baselines the cache (already done) and **skips detection for that
+    event** — plus a notice ("the checklist changed while timing; that edit
+    wasn't recorded, timing continues") when a session is active on the block.
+    A pure tail add/remove leaves every shared slot aligned and falls through to
+    the normal diff untouched. One accepted cost: a genuine check-off made in
+    the *same* editor event as a structural edit is skipped (rare — the user
+    re-ticks); a mid-run rename also trips the notice. Covered by
+    `SessionManager — checklist edited mid-run` in session-manager.test.ts.
 
 - **A note the plugin writes to could lose data if it's also open in an
   editor.** Originally flagged for the output note: `appendItem`/

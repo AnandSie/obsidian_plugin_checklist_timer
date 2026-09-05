@@ -85,7 +85,12 @@ export interface ActiveTask {
 // handleItemChecked.
 export class SessionManager {
 	private activeSession: ActiveSession | null = null;
-	private readonly blockStateCache = new Map<string, boolean[]>();
+	// Per-block snapshot from the previous parse — the baseline the positional
+	// check-off diff compares against. Item text is kept alongside the checked
+	// flag so processBlock can tell a genuine check-off (same slot, text
+	// unchanged, flag flipped) from the list shifting under it (an insert,
+	// delete, or rename that moves every slot below it).
+	private readonly blockStateCache = new Map<string, { checked: boolean; text: string }[]>();
 
 	constructor(
 		private readonly vault: VaultAccess,
@@ -198,7 +203,10 @@ export class SessionManager {
 
 	private async processBlock(file: TFile, block: ChecklistBlock) {
 		const key = this.blockKey(file, block);
-		const currentState = block.items.map((item) => item.checked);
+		const currentState = block.items.map((item) => ({
+			checked: item.checked,
+			text: item.text,
+		}));
 		const previousState = this.blockStateCache.get(key);
 		this.blockStateCache.set(key, currentState);
 
@@ -206,9 +214,46 @@ export class SessionManager {
 		// (no session resume by design, see CLAUDE.md).
 		if (!previousState) return;
 
+		// Check-off detection is positional: slot N is "newly checked" iff it
+		// went false -> true since the previous parse. That only holds while the
+		// list is stable. An item inserted, deleted, or renamed anywhere but the
+		// tail shifts every slot below it, and the positional diff then misreads
+		// the shift as a check-off — appending a phantom line to the output note
+		// and resetting the in-progress item's clock. Detect that by comparing
+		// item text at each shared slot: if any differs, the list moved under
+		// us. Skip detection for this event (the cache is already re-baselined
+		// above, so the next genuine check-off is measured cleanly against the
+		// new shape). A pure tail add/remove leaves every shared slot aligned
+		// and falls through to the normal diff untouched.
+		const shared = Math.min(previousState.length, currentState.length);
+		let midListShift = false;
+		for (let i = 0; i < shared; i++) {
+			if (previousState[i]?.text !== currentState[i]?.text) {
+				midListShift = true;
+				break;
+			}
+		}
+		if (midListShift) {
+			const session = this.activeSession;
+			if (
+				session &&
+				session.filePath === file.path &&
+				session.blockStartLine === block.startLine
+			) {
+				// Keep the status-bar's active-item view (getActiveTask) in step
+				// with the edited list even though nothing was timed this event.
+				session.items = block.items;
+				this.notify(
+					`Checklist timer: "${session.title}" — the checklist changed while timing; that edit wasn't recorded, timing continues.`,
+					this.resultFileOptions(session),
+				);
+			}
+			return;
+		}
+
 		const newlyChecked: number[] = [];
-		currentState.forEach((checked, index) => {
-			if (checked && !previousState[index]) newlyChecked.push(index);
+		currentState.forEach((state, index) => {
+			if (state.checked && !previousState[index]?.checked) newlyChecked.push(index);
 		});
 
 		const startIndex = resolveStartIndex(block, this.settings.startTag);
