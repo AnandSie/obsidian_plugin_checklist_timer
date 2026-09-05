@@ -51,6 +51,11 @@ interface ActiveSession {
 	// assumption that items are always checked in sequence.
 	items: ChecklistItem[];
 	startIndex: number;
+	// Timestamp (same clock as `now`) the session was paused, or null while
+	// running. While paused the in-progress item stops accumulating time;
+	// resumeSession (or the next check-off) folds the paused span out of
+	// lastEventTime so time spent paused is never attributed to any item.
+	pausedAt: number | null;
 }
 
 // Public snapshot of the item currently being timed, for status bar display.
@@ -59,6 +64,10 @@ export interface ActiveTask {
 	// Timestamp (same clock as the `now` constructor arg) the current item
 	// started accumulating time — i.e. ActiveSession.lastEventTime.
 	startTime: number;
+	// The timestamp the session was paused, or null while running. The status
+	// bar reads this to freeze the elapsed display (and show a paused
+	// indicator) instead of ticking up while the user is away.
+	pausedAt: number | null;
 }
 
 // Tracks at most one running session across the whole vault (see CLAUDE.md:
@@ -108,7 +117,63 @@ export class SessionManager {
 			(item, index) => index > session.startIndex && !item.checked,
 		);
 		if (!nextItem) return null;
-		return { name: nextItem.text, startTime: session.lastEventTime };
+		return {
+			name: nextItem.text,
+			startTime: session.lastEventTime,
+			pausedAt: session.pausedAt,
+		};
+	}
+
+	// Freezes the clock for the item currently being timed. Time between now
+	// and the matching resume (or the next check-off) is dropped rather than
+	// attributed to that item — see applyPauseOffset. A no-op notice fires if
+	// nothing is running or the session is already paused.
+	pauseSession() {
+		const session = this.activeSession;
+		if (!session) {
+			this.notify('Checklist timer: no active timer to pause.');
+			return;
+		}
+		if (session.pausedAt !== null) {
+			this.notify(
+				`Checklist timer: "${session.title}" is already paused.`,
+				this.resultFileOptions(session),
+			);
+			return;
+		}
+		session.pausedAt = this.now();
+		this.notify(`⏸️ "${session.title}" paused`, this.resultFileOptions(session));
+		this.onStatusChange();
+	}
+
+	// Restarts the clock after pauseSession, folding the paused span out so
+	// the in-progress item isn't charged for time the user was away.
+	resumeSession() {
+		const session = this.activeSession;
+		if (!session) {
+			this.notify('Checklist timer: no active timer to resume.');
+			return;
+		}
+		if (session.pausedAt === null) {
+			this.notify(
+				`Checklist timer: "${session.title}" is not paused.`,
+				this.resultFileOptions(session),
+			);
+			return;
+		}
+		this.applyPauseOffset(session);
+		this.notify(`▶️ "${session.title}" resumed`, this.resultFileOptions(session));
+		this.onStatusChange();
+	}
+
+	// Shifts lastEventTime forward by the just-ended paused span and clears
+	// the pause, so `now() - lastEventTime` continues to measure only active
+	// time. Called by resumeSession and by any check-off that lands while
+	// still paused (an implicit resume).
+	private applyPauseOffset(session: ActiveSession) {
+		if (session.pausedAt === null) return;
+		session.lastEventTime += this.now() - session.pausedAt;
+		session.pausedAt = null;
 	}
 
 	async handleFileContent(file: TFile, content: string) {
@@ -207,6 +272,10 @@ export class SessionManager {
 		const item = block.items[index];
 		if (!item) return;
 
+		// A check-off while still paused is an implicit resume — fold the
+		// paused span out first so it doesn't inflate this item's recorded time.
+		this.applyPauseOffset(session);
+
 		const duration = this.now() - session.lastEventTime;
 		session.lastEventTime = this.now();
 		session.results.push({ text: item.text, durationMs: duration });
@@ -244,6 +313,7 @@ export class SessionManager {
 			results: [],
 			items: block.items,
 			startIndex,
+			pausedAt: null,
 		};
 		this.notify(`▶️ "${title}" started`);
 		this.onStatusChange();

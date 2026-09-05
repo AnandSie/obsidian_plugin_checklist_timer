@@ -67,6 +67,20 @@ mechanism should feel familiar rather than inventing something new.
   while blocked, not just the first, so this can't fail silently.
 - A session ends either when the last item in the checklist is checked, or via
   a manual stop action in the UI.
+- A running session can be **paused** and **resumed** (commands only, no UI
+  affordance in v1) — for stepping away mid-run without that gap being charged
+  to the in-progress item. Pause just records `pausedAt` on the in-memory
+  session; resume folds the paused span out by shifting `lastEventTime`
+  forward by `now - pausedAt` (`applyPauseOffset`, session-manager.ts), so
+  `now - lastEventTime` keeps measuring only active time. Checking off the
+  next item while still paused is an implicit resume (same fold), so a user
+  who forgets to resume isn't penalised. Pause state is purely in-memory,
+  like the rest of the session — a crash mid-pause loses it, consistent with
+  "no session-state persistence" above. Only the currently-accumulating item
+  is affected; already-recorded items and the finish `Total` (summed from
+  those records) never see the pause. The status bar (`showActiveTaskTimer`)
+  freezes its elapsed readout and swaps ⏱ for ⏸ while paused, via a new
+  `pausedAt` field on `getActiveTask()`'s `ActiveTask`.
 - When a session ends by reaching the **last item** (not a manual stop), every
   item in the block is automatically unchecked again — a `resetOnCompletion`
   setting, **default on** — so a recurring checklist (e.g. a weekly review

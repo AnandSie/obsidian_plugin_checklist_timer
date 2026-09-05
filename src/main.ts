@@ -86,6 +86,22 @@ export default class ChecklistTimerPlugin extends Plugin {
 			},
 		});
 
+		this.addCommand({
+			id: 'pause-active-timer',
+			name: 'Pause active timer',
+			callback: () => {
+				this.sessionManager.pauseSession();
+			},
+		});
+
+		this.addCommand({
+			id: 'resume-active-timer',
+			name: 'Resume active timer',
+			callback: () => {
+				this.sessionManager.resumeSession();
+			},
+		});
+
 		this.addSettingTab(new ChecklistTimerSettingTab(this.app, this));
 
 		// Reading view only (see CLAUDE.md/the bar chart brief) — this
@@ -236,8 +252,13 @@ export default class ChecklistTimerPlugin extends Plugin {
 			this.stopActiveTaskTicker();
 			return;
 		}
-		const elapsed = formatElapsed(Date.now() - task.startTime, this.settings.activeTaskTimerFormat);
-		this.statusBarItemEl.setText(`⏱ ${truncateTaskName(task.name)}: ${elapsed}`);
+		// While paused, freeze the elapsed time at the pause instant and swap
+		// the icon — otherwise the status bar would keep ticking up even
+		// though no item is accumulating time.
+		const reference = task.pausedAt ?? Date.now();
+		const elapsed = formatElapsed(reference - task.startTime, this.settings.activeTaskTimerFormat);
+		const icon = task.pausedAt !== null ? '⏸' : '⏱';
+		this.statusBarItemEl.setText(`${icon} ${truncateTaskName(task.name)}: ${elapsed}`);
 		this.statusBarItemEl.show();
 		this.startActiveTaskTicker();
 	}
