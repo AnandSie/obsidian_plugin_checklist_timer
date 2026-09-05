@@ -37,7 +37,7 @@ interface ActiveSession {
 	// so a session with zero timed items leaves no stray file behind.
 	outputFile: TFile | null;
 	// Kept in memory (in addition to being appended line-by-line) so the
-	// finish footer can add a slowest-first summary. If Obsidian crashes
+	// finish write can add a slowest-first summary. If Obsidian crashes
 	// before finish, this in-memory copy is lost, but the already-appended
 	// lines in the note are not — see CLAUDE.md.
 	results: TimedResult[];
@@ -365,9 +365,17 @@ export class SessionManager {
 			const slowestFirstLines = slowestFirst
 				.map((result) => `- ${formatDuration(result.durationMs)} - ${result.text}`)
 				.join('\n');
-			const footer =
-				`\n**Total:** ${formatDuration(totalMs)}${suffix}\n\n` +
-				`## Slowest first\n\n${slowestFirstLines}\n`;
+			// Inserted *before* the incrementally-built "## In order" list
+			// (OUTPUT_NOTE_MARKER) rather than appended after it: that list can
+			// only ever be chronological, since items are written as they're
+			// checked off, so putting the slowest-first summary — the bottleneck
+			// view this plugin exists to surface — first means it's what the
+			// reader sees on opening the note, without scrolling past the raw
+			// run. A function replacer (not a string) keeps a `$` in an item's
+			// text from being read as a replacement pattern.
+			const summary =
+				`## Slowest first\n\n${slowestFirstLines}\n\n` +
+				`**Total:** ${formatDuration(totalMs)}${suffix}\n\n`;
 			try {
 				await this.writeNoteContent(outputFile, (current) =>
 					current
@@ -391,7 +399,8 @@ export class SessionManager {
 						// properties would otherwise silently get wrong.
 						.replace(/^end:.*$/m, `end: ${formatTimestamp(session.lastEventTime)}`)
 						.replace(/^total:.*$/m, `total: ${formatDuration(totalMs)}`)
-						.replace(/^longest:.*$/m, `longest: ${formatDuration(longestMs)}`) + footer,
+						.replace(/^longest:.*$/m, `longest: ${formatDuration(longestMs)}`)
+						.replace(OUTPUT_NOTE_MARKER, () => summary + OUTPUT_NOTE_MARKER),
 				);
 			} catch (err) {
 				footerErrorMessage = String(err);

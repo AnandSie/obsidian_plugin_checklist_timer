@@ -96,12 +96,20 @@ The plugin writes to a note in the vault incrementally, one item at a time,
 rather than batching everything until the end:
 
 - The note is created (lazily, on the first item checked after the start
-  item) and each subsequent check-off appends a line to it immediately —
-  so an abandoned/never-finished checklist still keeps whatever was timed.
+  item) and each subsequent check-off appends a line to it immediately,
+  under a `## In order` heading (also the `OUTPUT_NOTE_MARKER`) — so an
+  abandoned/never-finished checklist still keeps whatever was timed. That
+  incrementally-built list is necessarily chronological: items land as
+  they're checked off.
 - When the session ends — either because the last item was checked, or via
-  manual stop (marked `(stopped early)`) — a "Total" line is appended,
-  followed by a second list of the same items **sorted slowest-first**, so
-  the bottleneck is immediately visible without doing the comparison by eye.
+  manual stop (marked `(stopped early)`) — `finishSession` writes a
+  `## Slowest first` list of the same items **sorted slowest-first**,
+  followed by a "Total" line, *above* the `## In order` list (inserted by
+  string-replacing `OUTPUT_NOTE_MARKER` with the summary block + the
+  marker). So the bottleneck view is what the reader sees first on opening
+  the note, without scrolling past the raw chronological run; the
+  comparison is never done by eye. The final note order is therefore:
+  header → `## Slowest first` → Total → `## In order`.
 - Output location: configurable folder path, defaulting to vault root.
 - Filename: configurable via a template (further templating, e.g. reusing the
   user's existing Templater templates, is a future idea — not v1).

@@ -192,11 +192,11 @@ describe('SessionManager — basic sequential timing', () => {
 			'---\nstart: 1970-01-01T00:00:00\nend: 1970-01-01T00:00:08\ntotal: 00:00:08\nlongest: 00:00:05\n---\n\n' +
 				'# Week Plan timing\n\n' +
 				'Source: [[Week Plan]]\n\n' +
-				'## In order\n\n' +
+				'## Slowest first\n\n' +
 				'- 00:00:05 - Two\n' +
 				'- 00:00:03 - Three\n' +
 				'\n**Total:** 00:00:08\n\n' +
-				'## Slowest first\n\n' +
+				'## In order\n\n' +
 				'- 00:00:05 - Two\n' +
 				'- 00:00:03 - Three\n',
 		);
@@ -490,11 +490,11 @@ describe('SessionManager — reading view bar chart hint', () => {
 				'# Week Plan timing\n\n' +
 				'Source: [[Week Plan]]\n\n' +
 				'> [!tip] Switch to Reading view (📖 the book icon) to see each item as a bar chart.\n\n' +
-				'## In order\n\n' +
+				'## Slowest first\n\n' +
 				'- 00:00:05 - Two\n' +
 				'- 00:00:03 - Three\n' +
 				'\n**Total:** 00:00:08\n\n' +
-				'## Slowest first\n\n' +
+				'## In order\n\n' +
 				'- 00:00:05 - Two\n' +
 				'- 00:00:03 - Three\n',
 		);
@@ -1037,10 +1037,10 @@ describe('SessionManager — overwrite existing file setting', () => {
 			'---\nstart: 1970-01-01T00:00:00\nend: 1970-01-01T00:00:01\ntotal: 00:00:01\nlongest: 00:00:01\n---\n\n' +
 				'# Week Plan timing\n\n' +
 				'Source: [[Week Plan]]\n\n' +
-				'## In order\n\n' +
+				'## Slowest first\n\n' +
 				'- 00:00:01 - Two\n' +
 				'\n**Total:** 00:00:01\n\n' +
-				'## Slowest first\n\n' +
+				'## In order\n\n' +
 				'- 00:00:01 - Two\n',
 		);
 		assert.ok(
