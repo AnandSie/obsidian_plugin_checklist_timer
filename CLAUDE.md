@@ -164,11 +164,13 @@ CSV — keep the core data model simple (name + duration per item) so richer
 output formats (table, CSV, Dataview-friendly frontmatter) can be layered on
 without a rewrite.
 
-### Bar chart display (opt-in)
+### Bar chart display (default on)
 
-`showReadingViewBarChart` lets the output note show at a glance which item
-was the bottleneck, without the user comparing raw `HH:MM:SS` numbers by
-eye: it renders a small bar next to each timed item (`main.ts`'s
+`showReadingViewBarChart` (**default on**) lets the output note show at a
+glance which item was the bottleneck, without the user comparing raw
+`HH:MM:SS` numbers by eye — the same at-a-glance-bottleneck goal the note
+exists for, so it's on by default and the user opts *out*. It renders a
+small bar next to each timed item (`main.ts`'s
 `renderDurationBars()`, driven by the pure duration-matching/sizing logic in
 `utils/duration-bars.ts`) via `registerMarkdownPostProcessor()` — Reading
 view only, on purpose. Live Preview/Source mode is a separate rendering path
