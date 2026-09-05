@@ -45,8 +45,9 @@ export interface ChecklistTimerSettings {
 	// Reading view. Computed at render time (not write time), so it applies
 	// to both the "In order" and "Slowest first" lists. Reading view only;
 	// Live Preview/Source mode are a separate rendering path and are
-	// intentionally not touched. Default off, like the plugin's other
-	// settings that change what gets shown.
+	// intentionally not touched. Default on — seeing which item was the
+	// bottleneck at a glance (rather than comparing HH:MM:SS by eye) is the
+	// whole point of the output note, so it's on unless the user opts out.
 	showReadingViewBarChart: boolean;
 	// When true (default), the output note is opened automatically the
 	// moment a session finishes (completed or stopped early) — the same note
@@ -64,6 +65,6 @@ export const DEFAULT_SETTINGS: ChecklistTimerSettings = {
 	showActiveTaskTimer: true,
 	activeTaskTimerFormat: 'mm:ss',
 	overwriteExistingFile: false,
-	showReadingViewBarChart: false,
+	showReadingViewBarChart: true,
 	autoOpenOutputNote: true,
 };
