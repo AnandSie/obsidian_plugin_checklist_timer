@@ -947,6 +947,8 @@ describe('SessionManager — checklist edited mid-run', () => {
 		await tick(manager, file, '#timed\n- [x] Start\n- [ ] A\n- [ ] B\n- [ ] C\n');
 		clock.advance(5_000);
 		await tick(manager, file, '#timed\n- [x] Start\n- [x] A\n- [ ] B\n- [ ] C\n');
+		const beforeInsert = vault.findContent('Week Plan timing');
+		assert.ok(beforeInsert?.endsWith('## In order\n\n- 00:00:05 - A\n'), 'only "A" timed so far');
 
 		// "X" inserted between the last checked item and the current one — every
 		// slot from "B" down shifts, which the old positional diff misread as a
@@ -954,11 +956,9 @@ describe('SessionManager — checklist edited mid-run', () => {
 		clock.advance(60_000);
 		await tick(manager, file, '#timed\n- [x] Start\n- [x] A\n- [ ] X\n- [ ] B\n- [ ] C\n');
 
-		const afterInsert = vault.findContent('Week Plan timing');
 		assert.equal(
-			afterInsert,
-			'---\nstart: 1970-01-01T00:00:00\nend: \ntotal: \nlongest: \n---\n\n' +
-				'# Week Plan timing\n\nSource: [[Week Plan]]\n\n## In order\n\n- 00:00:05 - A\n',
+			vault.findContent('Week Plan timing'),
+			beforeInsert,
 			'no phantom line should be appended for the insertion',
 		);
 		assert.ok(
