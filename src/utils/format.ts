@@ -67,6 +67,16 @@ export function truncateTaskName(
 	return `${codePoints.slice(0, maxLength - 1).join('')}…`;
 }
 
+// Timestamp for the output note's frontmatter (`start`/`end`), formatted as
+// YYYY-MM-DDTHH:mm:ss. New properties default to Obsidian's plain Text type,
+// so this doesn't get its own date picker automatically — a user wanting
+// that can switch the property's type themselves. UTC (not local time) to
+// match renderFilename's existing {{date}} (also toISOString-based) and keep
+// output independent of the machine's timezone.
+export function formatTimestamp(ms: number): string {
+	return new Date(ms).toISOString().slice(0, 19);
+}
+
 export function renderFilename(template: string, title: string): string {
 	const date = new Date().toISOString().slice(0, 10);
 	return template.replace(/\{\{date\}\}/g, date).replace(/\{\{title\}\}/g, title);

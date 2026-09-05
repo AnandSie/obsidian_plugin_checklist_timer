@@ -6,7 +6,7 @@ import {
 	resolveStartIndex,
 	uncheckBlock,
 } from './utils/checklist';
-import { formatDuration, renderFilename } from './utils/format';
+import { formatDuration, formatTimestamp, renderFilename } from './utils/format';
 import { OUTPUT_NOTE_MARKER } from './utils/duration-bars';
 import { ChecklistTimerSettings } from './settings-schema';
 import { EditorAccess, Notifier, NotifyOptions, VaultAccess } from './timer-port';
@@ -24,6 +24,12 @@ interface TimedResult {
 interface ActiveSession {
 	filePath: string;
 	blockStartLine: number;
+	// When the session itself started (the start item's check-off) — kept
+	// separate from lastEventTime, which advances on every subsequent
+	// check-off, so the output note's frontmatter `start` property still
+	// reflects the true session start even once the output file is created
+	// later, on the *first timed* item.
+	startTime: number;
 	lastEventTime: number;
 	title: string;
 	outputPath: string;
@@ -226,10 +232,12 @@ export class SessionManager {
 
 	private startSession(file: TFile, block: ChecklistBlock, startIndex: number) {
 		const title = file.basename;
+		const startedAt = this.now();
 		this.activeSession = {
 			filePath: file.path,
 			blockStartLine: block.startLine,
-			lastEventTime: this.now(),
+			startTime: startedAt,
+			lastEventTime: startedAt,
 			title,
 			outputPath: this.resolveOutputPath(title),
 			outputFile: null,
@@ -284,7 +292,16 @@ export class SessionManager {
 				const barChartHint = this.settings.showReadingViewBarChart
 					? '> [!tip] Switch to Reading view (📖 the book icon) to see each item as a bar chart.\n\n'
 					: '';
-				const header = `# ${session.title} timing\n\nSource: [[${this.sourceLinkTarget(session)}]]\n\n${barChartHint}${OUTPUT_NOTE_MARKER}\n\n`;
+				// end/total/longest are left empty here — they're not known until
+				// the session finishes (finishSession fills them in via the same
+				// writeNoteContent path as the footer). Pre-declaring them at
+				// creation time, rather than adding them only at the end, means
+				// Obsidian's Properties panel shows a consistent shape from the
+				// note's first line onward, and a note left behind by a crash or
+				// an abandoned run (see CLAUDE.md — no session-resume) reads
+				// correctly as "incomplete" instead of missing the fields outright.
+				const frontmatter = `---\nstart: ${formatTimestamp(session.startTime)}\nend: \ntotal: \nlongest: \n---\n\n`;
+				const header = `${frontmatter}# ${session.title} timing\n\nSource: [[${this.sourceLinkTarget(session)}]]\n\n${barChartHint}${OUTPUT_NOTE_MARKER}\n\n`;
 				const existing = this.settings.overwriteExistingFile
 					? this.vault.getExistingFile(session.outputPath)
 					: null;
@@ -344,6 +361,7 @@ export class SessionManager {
 			suffix = reason === 'stopped' ? ' (stopped early)' : '';
 			totalMs = session.results.reduce((sum, result) => sum + result.durationMs, 0);
 			const slowestFirst = [...session.results].sort((a, b) => b.durationMs - a.durationMs);
+			const longestMs = slowestFirst[0]?.durationMs ?? 0;
 			const slowestFirstLines = slowestFirst
 				.map((result) => `- ${formatDuration(result.durationMs)} - ${result.text}`)
 				.join('\n');
@@ -351,7 +369,30 @@ export class SessionManager {
 				`\n**Total:** ${formatDuration(totalMs)}${suffix}\n\n` +
 				`## Slowest first\n\n${slowestFirstLines}\n`;
 			try {
-				await this.writeNoteContent(outputFile, (current) => current + footer);
+				await this.writeNoteContent(outputFile, (current) =>
+					current
+						// `.*` (not an exact "key: " match) so this still finds the
+						// placeholder line even if Obsidian has rewritten the
+						// frontmatter in the meantime — e.g. the output note being
+						// open in a pane's Properties panel (a real, documented case
+						// here — see autoOpenOutputNote/EditorAccess) strips the
+						// trailing space from an empty `end: ` down to `end:`. An
+						// exact-match regex would silently no-op here, leaving the
+						// note looking exactly like an *abandoned* one even though
+						// the run completed normally.
+						//
+						// `end` uses lastEventTime (the last check-off), not
+						// this.now() (the moment finishSession itself runs) — for a
+						// natural completion the two are the same instant, but for a
+						// manual stop there can be an arbitrary idle gap between the
+						// last check-off and pressing stop. Using lastEventTime keeps
+						// `end - start` always equal to `total`, which is what a
+						// Dataview query computing session length from these
+						// properties would otherwise silently get wrong.
+						.replace(/^end:.*$/m, `end: ${formatTimestamp(session.lastEventTime)}`)
+						.replace(/^total:.*$/m, `total: ${formatDuration(totalMs)}`)
+						.replace(/^longest:.*$/m, `longest: ${formatDuration(longestMs)}`) + footer,
+				);
 			} catch (err) {
 				footerErrorMessage = String(err);
 			}

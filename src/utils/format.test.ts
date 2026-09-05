@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { formatDuration, formatElapsed, renderFilename, truncateTaskName } from './format';
+import { formatDuration, formatElapsed, formatTimestamp, renderFilename, truncateTaskName } from './format';
 
 describe('formatDuration', () => {
 	it('formats zero as 00:00:00', () => {
@@ -85,6 +85,16 @@ describe('truncateTaskName', () => {
 		const result = truncateTaskName(name, 20);
 		assert.ok(result.includes('📅'), 'the emoji must survive intact, not be split');
 		assert.equal(Array.from(result).length, 20, 'length is measured in code points, not UTF-16 units');
+	});
+});
+
+describe('formatTimestamp', () => {
+	it('formats the Unix epoch in UTC', () => {
+		assert.equal(formatTimestamp(0), '1970-01-01T00:00:00');
+	});
+
+	it('formats a timestamp with seconds, independent of the machine timezone', () => {
+		assert.equal(formatTimestamp(1_234_567_890_000), '2009-02-13T23:31:30');
 	});
 });
 

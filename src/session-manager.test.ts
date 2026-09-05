@@ -180,7 +180,8 @@ describe('SessionManager — basic sequential timing', () => {
 		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n- [ ] Three\n');
 		assert.equal(
 			vault.findContent('Week Plan timing'),
-			'# Week Plan timing\n\nSource: [[Week Plan]]\n\n## In order\n\n- 00:00:05 - Two\n',
+			'---\nstart: 1970-01-01T00:00:00\nend: \ntotal: \nlongest: \n---\n\n' +
+				'# Week Plan timing\n\nSource: [[Week Plan]]\n\n## In order\n\n- 00:00:05 - Two\n',
 		);
 
 		clock.advance(3_000);
@@ -188,7 +189,8 @@ describe('SessionManager — basic sequential timing', () => {
 
 		assert.equal(
 			vault.findContent('Week Plan timing'),
-			'# Week Plan timing\n\n' +
+			'---\nstart: 1970-01-01T00:00:00\nend: 1970-01-01T00:00:08\ntotal: 00:00:08\nlongest: 00:00:05\n---\n\n' +
+				'# Week Plan timing\n\n' +
 				'Source: [[Week Plan]]\n\n' +
 				'## In order\n\n' +
 				'- 00:00:05 - Two\n' +
@@ -331,6 +333,123 @@ describe('SessionManager — basic sequential timing', () => {
 	});
 });
 
+describe('SessionManager — output note frontmatter', () => {
+	let vault: FakeVault;
+	let clock: FakeClock;
+
+	beforeEach(() => {
+		vault = new FakeVault();
+		clock = new FakeClock();
+	});
+
+	it('captures the session start time even though the note itself is created later, on the first timed item', async () => {
+		const { manager } = makeManager(vault, clock);
+		const file = sourceFile('Week Plan.md');
+
+		await manager.handleFileContent(file, '#timed\n- [ ] Start\n- [ ] Two\n');
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [ ] Two\n');
+		// Time passes between the start item and the first note-creating
+		// check-off — the frontmatter's `start` must still reflect the former,
+		// not the latter.
+		clock.advance(4_000);
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n');
+
+		const content = vault.findContent('Week Plan timing');
+		assert.ok(
+			content?.startsWith('---\nstart: 1970-01-01T00:00:00\n'),
+			`start should be the session's start time, not the note's creation time:\n${content}`,
+		);
+	});
+
+	it('leaves end/total/longest empty until the session finishes, so an abandoned note reads as incomplete', async () => {
+		const { manager } = makeManager(vault, clock);
+		const file = sourceFile('Week Plan.md');
+
+		await manager.handleFileContent(file, '#timed\n- [ ] Start\n- [ ] Two\n- [ ] Three\n');
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [ ] Two\n- [ ] Three\n');
+		clock.advance(1_000);
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n- [ ] Three\n');
+
+		const content = vault.findContent('Week Plan timing');
+		assert.ok(content?.includes('\nend: \n'));
+		assert.ok(content?.includes('\ntotal: \n'));
+		assert.ok(content?.includes('\nlongest: \n'));
+	});
+
+	it('fills in end/total/longest on finish, with longest matching the slowest item', async () => {
+		const { manager } = makeManager(vault, clock);
+		const file = sourceFile('Week Plan.md');
+
+		await manager.handleFileContent(file, '#timed\n- [ ] Start\n- [ ] Two\n- [ ] Three\n');
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [ ] Two\n- [ ] Three\n');
+		clock.advance(2_000);
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n- [ ] Three\n');
+		clock.advance(5_000);
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n- [x] Three\n');
+
+		const content = vault.findContent('Week Plan timing');
+		assert.ok(content?.includes('\nend: 1970-01-01T00:00:07\n'));
+		assert.ok(content?.includes('\ntotal: 00:00:07\n'));
+		assert.ok(
+			content?.includes('\nlongest: 00:00:05\n'),
+			'longest must be Three\'s 5s, not the 2s of Two',
+		);
+	});
+
+	it('fills in end/total/longest on a manual stop too, without the "(stopped early)" suffix that only the body Total line carries', async () => {
+		const { manager } = makeManager(vault, clock);
+		const file = sourceFile('Week Plan.md');
+
+		await manager.handleFileContent(file, '#timed\n- [ ] Start\n- [ ] Two\n- [ ] Three\n');
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [ ] Two\n- [ ] Three\n');
+		clock.advance(3_000);
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n- [ ] Three\n');
+
+		// An idle gap between the last check-off and the stop command itself —
+		// `end` must reflect the former (the last metered instant), not the
+		// latter, so `end - start` stays equal to `total` rather than
+		// over-counting the idle tail. See finishSession's comment on this.
+		clock.advance(10 * 60_000);
+		await manager.stopActiveSession();
+
+		const content = vault.findContent('Week Plan timing');
+		assert.ok(content?.includes('\nend: 1970-01-01T00:00:03\n'), 'end must be the last check-off, not the later stop time');
+		assert.ok(content?.includes('\ntotal: 00:00:03\n'));
+		assert.ok(content?.includes('\nlongest: 00:00:03\n'));
+		assert.ok(content?.includes('**Total:** 00:00:03 (stopped early)'));
+	});
+
+	it('still fills in end/total/longest when the placeholder lines no longer have their exact original spacing', async () => {
+		const { manager } = makeManager(vault, clock);
+		const file = sourceFile('Week Plan.md');
+
+		await manager.handleFileContent(file, '#timed\n- [ ] Start\n- [ ] Two\n');
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [ ] Two\n');
+		clock.advance(1_000);
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n');
+
+		// Simulates Obsidian rewriting the note's raw frontmatter out from
+		// under us — e.g. its Properties panel (shown while the note is open
+		// in a pane, a documented case here via autoOpenOutputNote/
+		// EditorAccess) strips the trailing space from an empty `end: ` down
+		// to `end:` when it re-serializes the YAML block. The fill-in must
+		// still find and replace these lines, not silently no-op.
+		const outputPath = [...vault.files.keys()][0] as string;
+		const rewritten = (vault.files.get(outputPath) as string)
+			.replace('end: \n', 'end:\n')
+			.replace('total: \n', 'total:\n')
+			.replace('longest: \n', 'longest:\n');
+		vault.files.set(outputPath, rewritten);
+
+		await manager.stopActiveSession();
+
+		const content = vault.files.get(outputPath);
+		assert.ok(content?.includes('\nend: 1970-01-01T00:00:01\n'));
+		assert.ok(content?.includes('\ntotal: 00:00:01\n'));
+		assert.ok(content?.includes('\nlongest: 00:00:01\n'));
+	});
+});
+
 describe('SessionManager — reading view bar chart hint', () => {
 	let vault: FakeVault;
 	let clock: FakeClock;
@@ -367,7 +486,8 @@ describe('SessionManager — reading view bar chart hint', () => {
 		const content = vault.findContent('Week Plan timing');
 		assert.equal(
 			content,
-			'# Week Plan timing\n\n' +
+			'---\nstart: 1970-01-01T00:00:00\nend: 1970-01-01T00:00:08\ntotal: 00:00:08\nlongest: 00:00:05\n---\n\n' +
+				'# Week Plan timing\n\n' +
 				'Source: [[Week Plan]]\n\n' +
 				'> [!tip] Switch to Reading view (📖 the book icon) to see each item as a bar chart.\n\n' +
 				'## In order\n\n' +
@@ -914,7 +1034,8 @@ describe('SessionManager — overwrite existing file setting', () => {
 		);
 		assert.equal(
 			content,
-			'# Week Plan timing\n\n' +
+			'---\nstart: 1970-01-01T00:00:00\nend: 1970-01-01T00:00:01\ntotal: 00:00:01\nlongest: 00:00:01\n---\n\n' +
+				'# Week Plan timing\n\n' +
 				'Source: [[Week Plan]]\n\n' +
 				'## In order\n\n' +
 				'- 00:00:01 - Two\n' +

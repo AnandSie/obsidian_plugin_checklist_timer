@@ -107,6 +107,43 @@ rather than batching everything until the end:
   user's existing Templater templates, is a future idea — not v1).
 - Content format (v1): a simple bulleted list of `duration - item name`,
   duration formatted as `HH:MM:SS`.
+- The note also carries normal Obsidian properties (YAML frontmatter):
+  `start`, `end`, `total`, `longest` — a first, small step toward the
+  Dataview-friendly direction described below, without waiting for the full
+  table/CSV rework. `start` is written the moment the note is created (on
+  the first timed item), since the session's actual start time is already
+  known by then. `end`/`total`/`longest` are declared at that same moment
+  too, but with **empty values** — they're not known until the session
+  finishes, but pre-declaring the keys (rather than adding them only at the
+  end) means the Properties panel shows a consistent shape from the note's
+  first line onward, and a note left behind by a crash or an abandoned run
+  (see "No session-state persistence" above) reads correctly as
+  *incomplete* rather than missing the fields outright. `finishSession`
+  (session-manager.ts) fills them in via simple line-anchored string
+  replacement in the same write that appends the footer — no YAML parser
+  involved, consistent with how the rest of this file is built. The
+  replacement matches `^end:.*$` (any content on the line), not an exact
+  `^end: \n` placeholder — the output note being open in a pane (a real,
+  common case here; see `autoOpenOutputNote`/`EditorAccess`) means Obsidian's
+  own Properties panel can rewrite the raw frontmatter first (e.g. an empty
+  `end: ` loses its trailing space down to `end:`), and an exact-match regex
+  would silently no-op there, leaving a *completed* run's note looking
+  exactly like an abandoned one. `end` is set from `session.lastEventTime`
+  (the last check-off), not the instant `finishSession` itself runs — for a
+  natural completion the two are the same instant, but a manual stop can
+  have an arbitrary idle gap between the last check-off and pressing stop;
+  using `lastEventTime` keeps `end - start` always equal to `total`, which a
+  Dataview query computing session length from these properties would
+  otherwise get wrong by that idle amount. Timestamps use UTC
+  (`formatTimestamp`, utils/format.ts) rather than local time, matching
+  `renderFilename`'s existing `{{date}}` and keeping output (and tests)
+  independent of the machine's timezone — note that new properties default
+  to Obsidian's plain Text type, so `start`/`end` don't automatically render
+  with its date picker; a user wanting that switches the property's type
+  themselves. `total`/`longest` reuse `formatDuration`'s `HH:MM:SS`, matching
+  the body list — unlike the body's "Total" line, the frontmatter `total`
+  never gets the `(stopped early)` suffix, since that's a display-only
+  annotation and the property should hold a plain, parseable duration.
 - Duration granularity (minutes-only, or including milliseconds) should be
   configurable eventually, but `HH:MM:SS` is the v1 default.
 - `autoOpenOutputNote` (default **on**) opens the output note automatically
