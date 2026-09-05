@@ -192,14 +192,38 @@ describe('SessionManager — basic sequential timing', () => {
 			'---\nstart: 1970-01-01T00:00:00\nend: 1970-01-01T00:00:08\ntotal: 00:00:08\nlongest: 00:00:05\n---\n\n' +
 				'# Week Plan timing\n\n' +
 				'Source: [[Week Plan]]\n\n' +
-				'## In order\n\n' +
+				'## Slowest first\n\n' +
 				'- 00:00:05 - Two\n' +
 				'- 00:00:03 - Three\n' +
 				'\n**Total:** 00:00:08\n\n' +
-				'## Slowest first\n\n' +
+				'## In order\n\n' +
 				'- 00:00:05 - Two\n' +
 				'- 00:00:03 - Three\n',
 		);
+		assert.ok(notices.some((n) => n.includes('finished in') && n.includes('click to open')));
+	});
+
+	it('appends the slowest-first summary + Total instead of dropping them when the "## In order" marker is gone from the body', async () => {
+		const { manager, notices } = makeManager(vault, clock);
+		const file = sourceFile('Week Plan.md');
+
+		await manager.handleFileContent(file, '#timed\n- [ ] Start\n- [ ] Two\n- [ ] Three\n');
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [ ] Two\n- [ ] Three\n');
+		clock.advance(5_000);
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n- [ ] Three\n');
+
+		// Simulate the heading being renamed/removed (e.g. edited in an open
+		// pane, or restructured by another plugin) before the session finishes.
+		const outputPath = [...vault.files.keys()].find((p) => p.includes('Week Plan timing'));
+		assert.ok(outputPath);
+		vault.files.set(outputPath, vault.files.get(outputPath)!.replace('## In order\n\n', ''));
+
+		clock.advance(3_000);
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n- [x] Three\n');
+
+		const content = vault.findContent('Week Plan timing');
+		assert.ok(content?.includes('## Slowest first\n\n- 00:00:05 - Two\n- 00:00:03 - Three\n\n**Total:** 00:00:08\n'));
+		assert.match(content ?? '', /total: 00:00:08/);
 		assert.ok(notices.some((n) => n.includes('finished in') && n.includes('click to open')));
 	});
 
@@ -490,11 +514,11 @@ describe('SessionManager — reading view bar chart hint', () => {
 				'# Week Plan timing\n\n' +
 				'Source: [[Week Plan]]\n\n' +
 				'> [!tip] Switch to Reading view (📖 the book icon) to see each item as a bar chart.\n\n' +
-				'## In order\n\n' +
+				'## Slowest first\n\n' +
 				'- 00:00:05 - Two\n' +
 				'- 00:00:03 - Three\n' +
 				'\n**Total:** 00:00:08\n\n' +
-				'## Slowest first\n\n' +
+				'## In order\n\n' +
 				'- 00:00:05 - Two\n' +
 				'- 00:00:03 - Three\n',
 		);
@@ -523,7 +547,7 @@ describe('SessionManager — getActiveTask', () => {
 		await manager.handleFileContent(file, '#timed\n- [ ] Start\n- [ ] Two\n- [ ] Three\n');
 		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [ ] Two\n- [ ] Three\n');
 
-		assert.deepEqual(manager.getActiveTask(), { name: 'Two', startTime: 0 });
+		assert.deepEqual(manager.getActiveTask(), { name: 'Two', startTime: 0, pausedAt: null });
 	});
 
 	it('advances to the next item, with a fresh start time, on each check-off', async () => {
@@ -536,7 +560,7 @@ describe('SessionManager — getActiveTask', () => {
 		clock.advance(5_000);
 		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n- [ ] Three\n');
 
-		assert.deepEqual(manager.getActiveTask(), { name: 'Three', startTime: 5_000 });
+		assert.deepEqual(manager.getActiveTask(), { name: 'Three', startTime: 5_000, pausedAt: null });
 	});
 
 	it('is null again once the session finishes', async () => {
@@ -616,6 +640,148 @@ describe('SessionManager — getActiveTask', () => {
 
 		releaseGate();
 		await finishing;
+	});
+});
+
+describe('SessionManager — pause and resume', () => {
+	let vault: FakeVault;
+	let clock: FakeClock;
+
+	beforeEach(() => {
+		vault = new FakeVault();
+		clock = new FakeClock();
+	});
+
+	async function startAndCheckStart(manager: SessionManager, file: TFile) {
+		await manager.handleFileContent(file, '#timed\n- [ ] Start\n- [ ] Two\n- [ ] Three\n');
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [ ] Two\n- [ ] Three\n');
+	}
+
+	it('drops the paused span from the in-progress item’s recorded time', async () => {
+		const { manager } = makeManager(vault, clock, { showReadingViewBarChart: false });
+		const file = sourceFile('Week Plan.md');
+		await startAndCheckStart(manager, file);
+
+		clock.advance(2_000); // active
+		manager.pauseSession();
+		clock.advance(60_000); // paused — must not count
+		manager.resumeSession();
+		clock.advance(3_000); // active again
+
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n- [ ] Three\n');
+
+		assert.equal(
+			vault.findContent('Week Plan timing'),
+			'---\nstart: 1970-01-01T00:00:00\nend: \ntotal: \nlongest: \n---\n\n' +
+				'# Week Plan timing\n\nSource: [[Week Plan]]\n\n## In order\n\n- 00:00:05 - Two\n',
+		);
+	});
+
+	it('a check-off while still paused is an implicit resume that excludes the paused span', async () => {
+		const { manager } = makeManager(vault, clock);
+		const file = sourceFile('Week Plan.md');
+		await startAndCheckStart(manager, file);
+
+		clock.advance(4_000); // active
+		manager.pauseSession();
+		clock.advance(30_000); // paused
+
+		// "Two" checked without an explicit resume first.
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n- [ ] Three\n');
+		assert.ok(vault.findContent('Week Plan timing')?.includes('- 00:00:04 - Two\n'));
+
+		// The clock is running again for "Three" — the pause did not carry over.
+		clock.advance(1_000);
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n- [x] Three\n');
+		assert.ok(vault.findContent('Week Plan timing')?.includes('- 00:00:01 - Three\n'));
+	});
+
+	it('leaves earlier items and the total untouched when paused before a manual stop', async () => {
+		const { manager } = makeManager(vault, clock);
+		const file = sourceFile('Week Plan.md');
+		await startAndCheckStart(manager, file);
+
+		clock.advance(6_000);
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n- [ ] Three\n');
+
+		manager.pauseSession();
+		clock.advance(120_000);
+		await manager.stopActiveSession();
+
+		const content = vault.findContent('Week Plan timing');
+		assert.ok(content?.includes('**Total:** 00:00:06 (stopped early)'));
+		assert.ok(!content?.includes('Three'));
+	});
+
+	it('keeps the end/total frontmatter invariant (end - start == total) across pauses', async () => {
+		const { manager } = makeManager(vault, clock);
+		const file = sourceFile('Week Plan.md');
+		await startAndCheckStart(manager, file);
+
+		clock.advance(5_000); // active for "Two"
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n- [ ] Three\n');
+
+		manager.pauseSession();
+		clock.advance(90_000); // a long break — must not land in end/total
+		manager.resumeSession();
+
+		clock.advance(3_000); // active for "Three"
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n- [x] Three\n');
+
+		const content = vault.findContent('Week Plan timing');
+		// start 1970-01-01T00:00:00, total 00:00:08 -> end must be
+		// 1970-01-01T00:00:08, not ...:01:38 (which would include the 90s pause).
+		assert.ok(content?.includes('start: 1970-01-01T00:00:00\n'), content);
+		assert.ok(content?.includes('end: 1970-01-01T00:00:08\n'), content);
+		assert.ok(content?.includes('total: 00:00:08\n'), content);
+	});
+
+	it('getActiveTask reports the pause instant while paused, then null again after resume', async () => {
+		const { manager } = makeManager(vault, clock);
+		const file = sourceFile('Week Plan.md');
+		await startAndCheckStart(manager, file);
+
+		clock.advance(2_000);
+		manager.pauseSession();
+		assert.deepEqual(manager.getActiveTask(), { name: 'Two', startTime: 0, pausedAt: 2_000 });
+
+		clock.advance(5_000);
+		manager.resumeSession();
+		assert.deepEqual(manager.getActiveTask(), { name: 'Two', startTime: 5_000, pausedAt: null });
+	});
+
+	it('fires a status change on pause and on resume so the status bar refreshes', async () => {
+		const { manager, getStatusChangeCount } = makeManager(vault, clock);
+		const file = sourceFile('Week Plan.md');
+		await startAndCheckStart(manager, file);
+
+		const before = getStatusChangeCount();
+		manager.pauseSession();
+		manager.resumeSession();
+		assert.equal(getStatusChangeCount(), before + 2);
+	});
+
+	it('notifies rather than throwing when there is nothing to pause or resume', async () => {
+		const { manager, notices } = makeManager(vault, clock);
+		manager.pauseSession();
+		manager.resumeSession();
+		assert.deepEqual(notices, [
+			'Checklist timer: no active timer to pause.',
+			'Checklist timer: no active timer to resume.',
+		]);
+	});
+
+	it('a second pause, or a resume while running, just notifies', async () => {
+		const { manager, notices } = makeManager(vault, clock);
+		const file = sourceFile('Week Plan.md');
+		await startAndCheckStart(manager, file);
+
+		manager.resumeSession();
+		assert.ok(notices.some((n) => n.includes('is not paused')));
+
+		manager.pauseSession();
+		manager.pauseSession();
+		assert.ok(notices.some((n) => n.includes('is already paused')));
 	});
 });
 
@@ -1038,10 +1204,10 @@ describe('SessionManager — overwrite existing file setting', () => {
 			'---\nstart: 1970-01-01T00:00:00\nend: 1970-01-01T00:00:01\ntotal: 00:00:01\nlongest: 00:00:01\n---\n\n' +
 				'# Week Plan timing\n\n' +
 				'Source: [[Week Plan]]\n\n' +
-				'## In order\n\n' +
+				'## Slowest first\n\n' +
 				'- 00:00:01 - Two\n' +
 				'\n**Total:** 00:00:01\n\n' +
-				'## Slowest first\n\n' +
+				'## In order\n\n' +
 				'- 00:00:01 - Two\n',
 		);
 		assert.ok(

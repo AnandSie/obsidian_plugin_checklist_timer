@@ -42,6 +42,11 @@ written incrementally as you go, so even an abandoned checklist keeps
 whatever was already timed. When a session ends, a summary sorted by
 duration (slowest first) is appended so the bottleneck is easy to spot.
 
+If you need to step away mid-run, the "Pause active timer" and "Resume
+active timer" commands freeze the clock for the current item — time spent
+paused isn't counted against it. Checking off the next item resumes
+automatically.
+
 Only one checklist can be timed at a time. If you start a second one while
 another is running, by default the first is stopped automatically (saving
 what it had timed) and the second starts — this is configurable.
