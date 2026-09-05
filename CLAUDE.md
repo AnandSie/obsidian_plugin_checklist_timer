@@ -67,6 +67,25 @@ mechanism should feel familiar rather than inventing something new.
   while blocked, not just the first, so this can't fail silently.
 - A session ends either when the last item in the checklist is checked, or via
   a manual stop action in the UI.
+- A running session can be **paused** and **resumed** (commands only, no UI
+  affordance in v1) — for stepping away mid-run without that gap being charged
+  to the in-progress item. Pause just records `pausedAt` on the in-memory
+  session; resume folds the paused span out by shifting `lastEventTime`
+  forward by `now - pausedAt` (`applyPauseOffset`, session-manager.ts), so
+  `now - lastEventTime` keeps measuring only active time. Checking off the
+  next item while still paused is an implicit resume (same fold), so a user
+  who forgets to resume isn't penalised. Pause state is purely in-memory,
+  like the rest of the session — a crash mid-pause loses it, consistent with
+  "no session-state persistence" above. Only the currently-accumulating item
+  is affected; already-recorded items and the finish `Total` (summed from
+  those records) never see the pause. The `end` frontmatter property is kept
+  in step: `applyPauseOffset` also accumulates each resolved pause into
+  `session.pausedMs`, which `finishSession` subtracts from `lastEventTime`
+  when writing `end`, so the `end - start == total` invariant the
+  output-format section relies on holds across pauses too. The status bar
+  (`showActiveTaskTimer`) freezes its elapsed readout, swaps ⏱ for ⏸, and
+  stops its per-second ticker while paused (restarted on resume) — via a new
+  `pausedAt` field on `getActiveTask()`'s `ActiveTask`.
 - When a session ends by reaching the **last item** (not a manual stop), every
   item in the block is automatically unchecked again — a `resetOnCompletion`
   setting, **default on** — so a recurring checklist (e.g. a weekly review
@@ -129,12 +148,15 @@ rather than batching everything until the end:
   `end: ` loses its trailing space down to `end:`), and an exact-match regex
   would silently no-op there, leaving a *completed* run's note looking
   exactly like an abandoned one. `end` is set from `session.lastEventTime`
-  (the last check-off), not the instant `finishSession` itself runs — for a
-  natural completion the two are the same instant, but a manual stop can
-  have an arbitrary idle gap between the last check-off and pressing stop;
-  using `lastEventTime` keeps `end - start` always equal to `total`, which a
-  Dataview query computing session length from these properties would
-  otherwise get wrong by that idle amount. Timestamps use UTC
+  (the last check-off) minus `session.pausedMs` (total time spent paused —
+  see the pause/resume bullet under "Interaction model"), not the instant
+  `finishSession` itself runs — for a natural completion with no pauses the
+  first two collapse to the same instant, but a manual stop can have an
+  arbitrary idle gap between the last check-off and pressing stop, and any
+  pause adds time that `total` (a sum of pause-excluding item durations)
+  doesn't count. Subtracting both keeps `end - start` always equal to
+  `total`, which a Dataview query computing session length from these
+  properties would otherwise get wrong. Timestamps use UTC
   (`formatTimestamp`, utils/format.ts) rather than local time, matching
   `renderFilename`'s existing `{{date}}` and keeping output (and tests)
   independent of the machine's timezone — note that new properties default
