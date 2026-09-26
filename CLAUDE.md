@@ -341,6 +341,64 @@ identifying checklists) over inventing a new mechanism.
 
 ## Fixed
 
+- **Checking the start item sometimes silently did nothing, requiring an
+  uncheck + re-check to actually start the timer.** `processBlock`
+  (session-manager.ts) treats a block's first-ever parse as an opportunity to
+  baseline `blockStateCache` rather than fire anything (`!previousState`
+  early return) — by design, so reopening Obsidian mid-run doesn't resume a
+  session from whatever was already checked (see "No session-state
+  persistence" above). But the only things that ever triggered a parse were
+  the `editor-change`/`vault.on('modify')` listeners, and both fire *because
+  of* the check-off itself. So if a note hadn't been touched since
+  Obsidian/the plugin last loaded, the user's first click on the start item
+  *was* that first-ever parse — read as pre-existing state and swallowed,
+  exactly as if it were a stale checked box from a previous run. Unchecking
+  it (checked → unchecked isn't detected either way) and re-checking then
+  worked, because by then the cache held a real baseline to diff against.
+  Reproduced only when no other edit had touched the note first, which
+  matched the intermittent "sometimes" in how it was noticed — typing
+  anything, or having already run the checklist once this session, warmed
+  the cache and masked it.
+  - **Fix**: `SessionManager.primeFile()` seeds `blockStateCache` for a
+    block with no existing entry, without diffing or firing anything, and is
+    now called at the moment a note *becomes* observable rather than waiting
+    for the first edit — `workspace.on('file-open')` for a newly-activated
+    note, plus a one-time `iterateAllLeaves()` pass in
+    `workspace.onLayoutReady()` for notes already open when the plugin loads
+    (restored tabs after an app restart, or every reload in the dev vault).
+    The layout-ready pass reads each open note from its live editor buffer
+    rather than disk, since the buffer may be ahead of a not-yet-saved copy.
+    `primeFile` only fills a block's cache if it's empty — it never
+    overwrites an existing entry, so a prime call racing an in-progress
+    session can't reset the cache to a stale unchecked snapshot and cause
+    the next real check-off to be misread. Reading View is still covered —
+    opening a note in Reading View is a `MarkdownView` pane like any other,
+    so `file-open` fires for it too.
+
+    The author's own workflow ticks the start item via the Checklist
+    plugin's sidebar or an embedded (`![[Week Plan]]`) checklist rather than
+    opening the source note itself, which never fires `file-open` — so
+    `main.ts` also primes every note carrying the timed tag (found via
+    `metadataCache.getFileCache().tags`, not a full-vault content scan) once
+    at `workspace.onLayoutReady()` (`primeAllTimedNotes()`), and again on
+    `vault.on('create')` for a note created fresh from a template with the
+    tag already in it (a new week's plan) and checked off before ever being
+    opened as its own pane. Either way, what actually gets ticked is the
+    *source* note (the sidebar and an embed both write straight to it), and
+    that note goes through the same tag-scan/create priming as any other
+    note carrying the tag — it doesn't matter whether the tick arrives via
+    the note's own pane, the sidebar, or an embed. A brand-new file's
+    metadata cache is often still null the instant `create` fires (Obsidian
+    resolves it asynchronously), so `fileHasTimedTag` treats "not yet
+    indexed" as "can't rule it out" and reads the file anyway rather than
+    risk skipping a genuinely tagged one. The `create` handler also ignores
+    events until `workspace.layoutReady` is true, since Obsidian fires
+    `create` once per existing file during the initial vault scan too —
+    those are already covered by the layout-ready pass, so the guard just
+    avoids reading every tagged file twice at startup. Remaining edge case,
+    not worth fixing: ticking in the first second or two after startup,
+    before the async layout-ready scan reaches that particular note.
+
 - **Inserting/deleting a checklist item mid-run recorded phantom timings.**
   Check-off detection in `processBlock` (session-manager.ts) was a purely
   positional diff: slot N is "newly checked" iff its checked-boolean went
