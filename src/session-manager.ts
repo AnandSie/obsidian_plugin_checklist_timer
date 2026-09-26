@@ -203,6 +203,34 @@ export class SessionManager {
 		}
 	}
 
+	// Seeds blockStateCache for a note the plugin hasn't observed yet, without
+	// diffing or firing anything — called from main.ts on file-open, for every
+	// leaf already open at layout-ready, for every note carrying the timed tag
+	// at layout-ready (metadataCache-driven, so the sidebar/an embed can prime
+	// a note that's never opened as its own pane), and on vault.on('create')
+	// for a freshly-created tagged note (e.g. a new week's plan from a
+	// template) — so a block's *true* first observation happens before the
+	// user can interact with it. Without this, checking a start item — with no
+	// other edit having touched the note since Obsidian/the plugin last
+	// loaded, and the note never opened as a pane — is itself the first time
+	// processBlock ever sees the block, so that genuine check-off gets read as
+	// "pre-existing state" and silently swallowed by the `!previousState` guard
+	// below (the user has to uncheck and re-check to actually start the timer).
+	// Only seeds a block with no existing entry — a block already cached (e.g.
+	// mid-run) is left alone, since overwriting it here could hide a real
+	// check-off that happened between the last processBlock call and this one.
+	primeFile(file: TFile, content: string) {
+		const blocks = findTimedBlocks(content, this.settings.timedTag);
+		for (const block of blocks) {
+			const key = this.blockKey(file, block);
+			if (this.blockStateCache.has(key)) continue;
+			this.blockStateCache.set(
+				key,
+				block.items.map((item) => ({ checked: item.checked, text: item.text })),
+			);
+		}
+	}
+
 	private blockKey(file: TFile, block: ChecklistBlock): string {
 		return `${file.path}#${block.startLine}`;
 	}

@@ -357,6 +357,53 @@ describe('SessionManager — basic sequential timing', () => {
 	});
 });
 
+describe('SessionManager — primeFile', () => {
+	let vault: FakeVault;
+	let clock: FakeClock;
+
+	beforeEach(() => {
+		vault = new FakeVault();
+		clock = new FakeClock();
+	});
+
+	it('lets the very first check-off start the timer, instead of being read as pre-existing state', async () => {
+		const { manager, notices } = makeManager(vault, clock);
+		const file = sourceFile('Week Plan.md');
+
+		// Simulates opening the note before the user touches anything —
+		// without this call, checking the start item below would itself be
+		// processBlock's first-ever observation of the block, and get
+		// swallowed as a baseline instead of starting a session.
+		manager.primeFile(file, '#timed\n- [ ] Start\n- [ ] Two\n');
+
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [ ] Two\n');
+		assert.ok(notices.includes('▶️ "Week Plan" started'));
+	});
+
+	it('does not overwrite an already-cached block with stale (e.g. pre-check-off) content', async () => {
+		const { manager, notices } = makeManager(vault, clock);
+		const file = sourceFile('Week Plan.md');
+
+		await manager.handleFileContent(file, '#timed\n- [ ] Start\n- [ ] Two\n');
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [ ] Two\n');
+		assert.ok(notices.includes('▶️ "Week Plan" started'));
+
+		// A late prime call (e.g. a stray file-open event racing the check-off
+		// above) must not reset the cache back to unchecked — if it did, the
+		// next real check-off below would misread the already-started item as
+		// newly checked again instead of the item that's actually new.
+		manager.primeFile(file, '#timed\n- [ ] Start\n- [ ] Two\n');
+
+		clock.advance(2_000);
+		await manager.handleFileContent(file, '#timed\n- [x] Start\n- [x] Two\n');
+		assert.ok(
+			!notices.some((n) => n.includes('already being timed')),
+			'the stale prime must not resurrect the start item as a fresh check-off',
+		);
+		assert.ok(notices.some((n) => n.includes('⏱ 00:00:02 - Two')));
+	});
+});
+
 describe('SessionManager — output note frontmatter', () => {
 	let vault: FakeVault;
 	let clock: FakeClock;

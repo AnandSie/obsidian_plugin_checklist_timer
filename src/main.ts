@@ -158,6 +158,85 @@ export default class ChecklistTimerPlugin extends Plugin {
 				});
 			}),
 		);
+
+		// Seeds SessionManager's block-state cache the moment a note becomes
+		// active, before the user has any chance to click a checkbox — closes a
+		// race where opening a note and immediately checking its start item (with
+		// no other edit having touched the note since Obsidian/the plugin last
+		// loaded) is itself the block's first observation, so that genuine
+		// check-off reads as pre-existing state and is silently swallowed. See
+		// SessionManager.primeFile's doc comment.
+		this.registerEvent(
+			this.app.workspace.on('file-open', (file) => {
+				if (!file || file.extension !== 'md') return;
+				void this.app.vault.cachedRead(file).then((content) => {
+					this.sessionManager.primeFile(file, content);
+				});
+			}),
+		);
+
+		// file-open only fires on a change of active file, so it misses notes
+		// already sitting open in a pane when the plugin loads (app startup with
+		// restored tabs, or a plugin reload in the dev vault) — prime those too,
+		// from each editor's live buffer rather than disk, since the buffer may
+		// be ahead of a not-yet-saved disk copy.
+		this.app.workspace.onLayoutReady(() => {
+			this.app.workspace.iterateAllLeaves((leaf) => {
+				const view = leaf.view;
+				if (view instanceof MarkdownView && view.file) {
+					this.sessionManager.primeFile(view.file, view.editor.getValue());
+				}
+			});
+
+			// file-open only covers notes that become the active pane. A
+			// check-off can also arrive with the source note never opened at
+			// all — the Checklist plugin's sidebar, an embedded (![[...]])
+			// checklist, or a hover preview all write straight to the note.
+			// Prime every note that carries the timed tag, found via
+			// metadataCache (already computed, no extra parsing) rather than
+			// reading the whole vault — primeFile no-ops on a block it's
+			// already seen, so this can't clobber the live-buffer prime above.
+			void this.primeAllTimedNotes();
+		});
+
+		// Covers a note created fresh from a template with the tag already in
+		// it (e.g. a new week's plan) and then checked off via the sidebar/an
+		// embed before ever being opened as its own pane — the layout-ready
+		// scan above only sees notes that existed at load time.
+		this.registerEvent(
+			this.app.vault.on('create', (file) => {
+				// Obsidian also fires 'create' once per file during the initial
+				// vault scan on load — those are already covered by
+				// primeAllTimedNotes() above, so skip until the workspace (and
+				// that scan) is done to avoid redundant reads at startup.
+				if (!this.app.workspace.layoutReady) return;
+				if (!(file instanceof TFile) || file.extension !== 'md') return;
+				if (!this.fileHasTimedTag(file)) return;
+				void this.app.vault.cachedRead(file).then((content) => {
+					this.sessionManager.primeFile(file, content);
+				});
+			}),
+		);
+	}
+
+	private fileHasTimedTag(file: TFile): boolean {
+		const cache = this.app.metadataCache.getFileCache(file);
+		// A brand-new file's metadata is resolved asynchronously after
+		// vault.on('create') fires, so the cache is typically still null at
+		// that point — treat "not yet indexed" as "can't rule it out" rather
+		// than silently skipping it. primeFile itself filters through
+		// findTimedBlocks, so an untagged file costs one harmless cachedRead.
+		if (!cache) return true;
+		const needle = this.settings.timedTag.toLowerCase();
+		return (cache.tags ?? []).some((t) => t.tag.toLowerCase().includes(needle));
+	}
+
+	private async primeAllTimedNotes() {
+		for (const file of this.app.vault.getMarkdownFiles()) {
+			if (!this.fileHasTimedTag(file)) continue;
+			const content = await this.app.vault.cachedRead(file);
+			this.sessionManager.primeFile(file, content);
+		}
 	}
 
 	onunload() {
